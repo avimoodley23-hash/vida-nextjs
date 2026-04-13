@@ -41,8 +41,8 @@ export function useVidaData(userId?: string | null) {
     try {
       const storedUserId = localStorage.getItem(USER_KEY);
       const stored = localStorage.getItem(STORE_KEY);
-      // If a userId is provided and it differs from stored, clear and start fresh
-      if (userId && storedUserId && storedUserId !== userId) {
+      // Clear data if: user is logged in but data belongs to a different (or no) user
+      if (userId && storedUserId !== userId) {
         localStorage.removeItem(STORE_KEY);
         localStorage.setItem(USER_KEY, userId);
         setData(emptyData());
