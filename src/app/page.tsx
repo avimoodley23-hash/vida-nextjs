@@ -147,7 +147,16 @@ export default function VidaApp() {
       else if (r.action === 'log_habit' && r.params?.habit_name) logHabit(String(r.params.habit_name));
       else if (r.action === 'create_habit' && r.params?.name) addHabit(String(r.params.name), String(r.params.icon || '✨'));
       else if (r.action === 'log_spending' && r.params?.amount) logSpending(Number(r.params.amount), String(r.params.category || 'Other'));
-      else if (r.action === 'add_event' && r.params) addEvent({ title: String(r.params.title || ''), date: String(r.params.date || rd(7)), type: (r.params.type as 'birthday' | 'event' | 'appointment') || 'event', detail: r.params.detail ? String(r.params.detail) : undefined });
+      else if (r.action === 'add_event' && r.params) {
+        addEvent({ title: String(r.params.title || ''), date: String(r.params.date || rd(7)), type: (r.params.type as 'birthday' | 'event' | 'appointment') || 'event', detail: r.params.detail ? String(r.params.detail) : undefined, googleEventId: r.params.googleEventId ? String(r.params.googleEventId) : undefined });
+        // Refresh the Upcoming panel so the new Google Calendar event shows immediately
+        if (accessToken && r.params.googleEventId) {
+          fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${accessToken}` } })
+            .then(res => res.json())
+            .then(d => { if (d.events) setGcalEvents(d.events); })
+            .catch(() => {});
+        }
+      }
       addMessage({ role: 'assistant', text: r.response, time: new Date().toISOString() });
     } catch {
       addMessage({ role: 'assistant', text: "Couldn't reach the AI. Make sure your GEMINI_API_KEY is set in .env!", time: new Date().toISOString() });
