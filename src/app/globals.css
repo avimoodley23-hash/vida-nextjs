@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800&family=Playfair+Display:wght@500;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-vida-bg: #F5F0E8;
+  --color-vida-cream: #F0EAD6;
+  --color-vida-warm: #FDFBF7;
+  --color-vida-text: #2D2A26;
+  --color-vida-secondary: #7A756D;
+  --color-vida-muted: #B5AFA5;
+
+  --color-sage: #C5D4A0;
+  --color-sage-light: #E8F0D4;
+  --color-sage-dark: #6B7F3F;
+
+  --color-lavender: #D4C5E8;
+  --color-lavender-light: #EDE6F5;
+  --color-lavender-dark: #6B4F8A;
+
+  --color-pink: #F2C4D0;
+  --color-pink-light: #FBE8EE;
+  --color-pink-dark: #9E4F6A;
+
+  --color-peach: #F5D5B8;
+  --color-peach-light: #FDF0E3;
+  --color-peach-dark: #9E6B3A;
+
+  --color-sky: #B8D8E8;
+  --color-sky-light: #E3F1F8;
+  --color-sky-dark: #3A6F8A;
+
+  --color-mint: #B8E8D4;
+  --color-mint-light: #E0F5EC;
+  --color-mint-dark: #3A8A5F;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-display: 'Playfair Display', serif;
+
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-3xl: 32px;
+}
+
+html, body { height: 100%; overflow: hidden; background: #F5F0E8; }
+
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes msgPop {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.msg-pop { animation: msgPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+@keyframes tBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+.typing-dot { animation: tBounce 1.2s infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes recPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,93,93,0.3); }
+  50% { box-shadow: 0 0 0 8px rgba(232,93,93,0); }
+}
+.rec-pulse { animation: recPulse 1.5s infinite; }
+
+.bento-card { transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.bento-card:hover { transform: translateY(-2px); }
+.bento-card:active { transform: scale(0.98); }
