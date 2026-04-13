@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processWithGemini } from '@/lib/gemini';
 import { createCalendarEvent, getUpcomingEvents } from '@/lib/google-calendar';
+import { getRecentEmails } from '@/lib/gmail';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,19 +12,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No message provided' }, { status: 400 });
     }
 
-    // Process through Gemini
+    // Fetch live Google data to enrich Gemini's context
+    let calendarEvents: string[] = context?.recentEvents || [];
+    let gmailSummary: string[] = [];
+
+    if (accessToken) {
+      // Always pull upcoming calendar events so Gemini has real schedule context
+      try {
+        const events = await getUpcomingEvents(accessToken, 14);
+        if (events.length > 0) {
+          calendarEvents = events
+            .slice(0, 8)
+            .map(e => `${e.date}${e.time ? ' ' + e.time : ''} — ${e.title}${e.detail ? ` (${e.detail})` : ''}`);
+        }
+      } catch (err) {
+        console.error('Calendar pre-fetch failed:', err);
+      }
+
+      // Fetch Gmail inbox summaries for context
+      try {
+        const emails = await getRecentEmails(accessToken, 8);
+        gmailSummary = emails.map(e => `From: ${e.from} | Subject: ${e.subject}`);
+      } catch (err) {
+        console.error('Gmail pre-fetch failed:', err);
+      }
+    }
+
+    // Process through Gemini with enriched context
     const result = await processWithGemini(message, {
       today: context?.today || new Date().toISOString().split('T')[0],
       currentTime: context?.currentTime || new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
       pendingReminders: context?.pendingReminders || 0,
       habitsDoneToday: context?.habitsDoneToday || 0,
       totalHabits: context?.totalHabits || 0,
-      recentEvents: context?.recentEvents || [],
+      recentEvents: calendarEvents,
       monthSpending: context?.monthSpending || 0,
+      gmailSummary,
     });
 
-    // If we have a Google access token and the action involves calendar, sync
-    if (accessToken && result.action === 'create_reminder' && result.params) {
+    // If action is to create a reminder/event and we have a token, also add to Google Calendar
+    if (accessToken && (result.action === 'create_reminder' || result.action === 'add_event') && result.params) {
       try {
         const calResult = await createCalendarEvent(accessToken, {
           title: String(result.params.title || ''),
@@ -31,31 +59,12 @@ export async function POST(req: NextRequest) {
           time: result.params.time ? String(result.params.time) : undefined,
           description: 'Created by Vida',
         });
-        
         if (calResult.success) {
-          result.response += '\n\n📅 Also added to your Google Calendar!';
+          result.response += '\n\n📅 Added to your Google Calendar (syncs to iPhone too)!';
           result.params.googleEventId = calResult.eventId || '';
         }
       } catch (err) {
         console.error('Calendar sync failed:', err);
-        // Don't fail the whole request — reminder still saved locally
-      }
-    }
-
-    // If checking schedule and we have access token, enrich with Google Calendar
-    if (accessToken && result.action === 'check_schedule') {
-      try {
-        const events = await getUpcomingEvents(accessToken, 7);
-        if (events.length > 0) {
-          const eventList = events
-            .slice(0, 5)
-            .map(e => `• ${e.date} — ${e.title}${e.detail ? ` (${e.detail})` : ''}`)
-            .join('\n');
-          result.response += `\n\nFrom Google Calendar:\n${eventList}`;
-          result.params.googleEvents = JSON.stringify(events);
-        }
-      } catch (err) {
-        console.error('Calendar fetch failed:', err);
       }
     }
 

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { useVidaData } from '@/lib/useVidaData';
-import { Send, Mic, MessageCircle, Bell, Check, Activity, Star, Calendar, CreditCard, Sun, Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X } from 'lucide-react';
+import { Send, Mic, MessageCircle, Bell, Check, Activity, Star, Calendar, CreditCard, Sun, Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X, LogOut } from 'lucide-react';
 
 function HabitIcon({ name, size = 16 }: { name: string; size?: number }) {
   const n = name.toLowerCase();
@@ -40,6 +41,12 @@ function ft(t: string) { const [h, m] = t.split(':').map(Number); return `${h % 
 function dt(d: string) { const a = new Date(); a.setHours(0,0,0,0); return Math.round((new Date(d + 'T00:00:00').getTime() - a.getTime()) / 864e5); }
 
 export default function VidaApp() {
+  const { data: session, status } = useSession();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const accessToken = (session as any)?.accessToken as string | undefined;
+  const userName = session?.user?.name?.split(' ')[0] || 'there';
+  const userEmail = session?.user?.email || '';
+
   const [panel, setPanel] = useState<Panel>('home');
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
@@ -49,13 +56,13 @@ export default function VidaApp() {
   const [hf, setHf] = useState({ name: '' });
   const [ef, setEf] = useState({ title: '', date: '', type: 'event' as 'birthday' | 'event' | 'appointment', detail: '' });
   const chatEnd = useRef<HTMLDivElement>(null);
-  const { data, loaded, addMessage, addReminder, toggleReminder, logHabit, toggleHabitDay, addHabit, addEvent, logSpending, clearMessages } = useVidaData();
+  const { data, loaded, addMessage, addReminder, toggleReminder, logHabit, toggleHabitDay, addHabit, addEvent, logSpending, clearMessages } = useVidaData(userEmail || undefined);
 
   const scroll = useCallback(() => { setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100); }, []);
 
   useEffect(() => {
     if (panel === 'chat' && data.messages.length === 0 && loaded) {
-      addMessage({ role: 'assistant', text: "Hey Avi! ☀️\n\nI'm **Vida** — powered by Gemini AI. I connect to your Google Calendar and help manage your whole life.\n\nJust type or talk naturally:\n• \"Remind me to call the landlord tomorrow\"\n• \"I went to the gym\"\n• \"Spent R200 on groceries\"\n• \"What's my week looking like?\"", time: new Date().toISOString() });
+      addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — powered by Gemini AI. I'm connected to your Google Calendar and Gmail so I actually know what's going on in your life.\n\nJust type or talk naturally:\n• \"What's on my calendar this week?\"\n• \"Do I have any important emails?\"\n• \"Remind me to call the dentist tomorrow\"\n• \"Add gym to my habits\"`, time: new Date().toISOString() });
     }
   }, [panel, loaded]); // eslint-disable-line
 
@@ -69,6 +76,7 @@ export default function VidaApp() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          accessToken,
           context: {
             today, currentTime: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
             pendingReminders: data.reminders.filter(r => !r.done).length,
@@ -109,7 +117,7 @@ export default function VidaApp() {
 
   function newChat() {
     clearMessages();
-    addMessage({ role: 'assistant', text: "Hey Avi! ☀️\n\nI'm **Vida** — powered by Gemini AI. I connect to your Google Calendar and help manage your whole life.\n\nJust type or talk naturally:\n• \"Remind me to call the landlord tomorrow\"\n• \"I went to the gym\"\n• \"Spent R200 on groceries\"\n• \"What's my week looking like?\"", time: new Date().toISOString() });
+    addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — powered by Gemini AI. I'm connected to your Google Calendar and Gmail so I actually know what's going on in your life.\n\nJust type or talk naturally:\n• \"What's on my calendar this week?\"\n• \"Do I have any important emails?\"\n• \"Remind me to call the dentist tomorrow\"\n• \"Add gym to my habits\"`, time: new Date().toISOString() });
   }
 
   function openAddForm(type: 'reminder' | 'habit' | 'event') {
@@ -137,7 +145,44 @@ export default function VidaApp() {
     setAddForm(null);
   }
 
-  if (!loaded) return <div className="h-dvh flex items-center justify-center bg-vida-bg"><span className="text-3xl animate-pulse">✦</span></div>;
+  if (status === 'loading' || !loaded) return (
+    <div className="h-dvh flex items-center justify-center bg-vida-bg">
+      <span className="text-3xl animate-pulse">✦</span>
+    </div>
+  );
+
+  if (status === 'unauthenticated') return (
+    <div className="h-dvh flex flex-col items-center justify-center bg-vida-bg px-8 max-w-[480px] mx-auto">
+      <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-sage to-lavender flex items-center justify-center text-4xl mb-6 shadow-lg">
+        ✦
+      </div>
+      <h1 className="text-3xl font-bold tracking-tight mb-2">Vida</h1>
+      <p className="text-vida-secondary text-center text-[15px] mb-10 leading-relaxed">
+        Your AI personal assistant — connected to your real Google Calendar and Gmail.
+      </p>
+      <button
+        onClick={() => signIn('google')}
+        className="w-full flex items-center justify-center gap-3 bg-vida-text text-vida-bg rounded-2xl py-4 text-[16px] font-bold transition hover:opacity-90 active:scale-95 shadow-md"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continue with Google
+      </button>
+      <p className="text-xs text-vida-muted text-center mt-6 leading-relaxed">
+        Vida requests access to your Google Calendar and Gmail so Gemini can read your schedule and emails. Your data is never stored on our servers.
+      </p>
+    </div>
+  );
+
+  if (!loaded) return (
+    <div className="h-dvh flex items-center justify-center bg-vida-bg">
+      <span className="text-3xl animate-pulse">✦</span>
+    </div>
+  );
 
   const today = rd(0);
   const hDone = data.habits.filter(h => h.log[today]).length;
@@ -150,15 +195,22 @@ const bday = data.events.find(e => e.type === 'birthday' && dt(e.date) >= 1 && d
       {/* HEADER */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sage to-lavender flex items-center justify-center font-bold">A</div>
+          {session?.user?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={session.user.image} alt="" className="w-10 h-10 rounded-full object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sage to-lavender flex items-center justify-center font-bold text-vida-bg">
+              {userName[0]?.toUpperCase()}
+            </div>
+          )}
           <div>
-            <h1 className="text-lg font-bold tracking-tight">{hr < 12 ? 'Morning' : hr < 17 ? 'Afternoon' : 'Evening'}, Avi!</h1>
+            <h1 className="text-lg font-bold tracking-tight">{hr < 12 ? 'Morning' : hr < 17 ? 'Afternoon' : 'Evening'}, {userName}!</h1>
             <p className="text-xs text-vida-secondary -mt-0.5">{hr < 12 ? "Let's make today count" : hr < 17 ? "Hope your day's going well" : 'Time to wind down'}</p>
           </div>
         </div>
         <div className="flex gap-1.5">
           <button onClick={() => setPanel('chat')} className="w-9 h-9 rounded-2xl bg-vida-warm shadow-sm flex items-center justify-center text-vida-secondary hover:bg-vida-cream transition"><MessageCircle size={16} /></button>
-          <button className="w-9 h-9 rounded-2xl bg-vida-warm shadow-sm flex items-center justify-center text-vida-secondary hover:bg-vida-cream transition"><Bell size={16} /></button>
+          <button onClick={() => signOut()} title="Sign out" className="w-9 h-9 rounded-2xl bg-vida-warm shadow-sm flex items-center justify-center text-vida-secondary hover:bg-vida-cream transition"><LogOut size={16} /></button>
         </div>
       </header>
 

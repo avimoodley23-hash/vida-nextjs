@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { VidaData, Reminder, Habit, CalendarEvent, SpendingSummary, ChatMessage } from '@/types';
 
 const STORE_KEY = 'vida_data';
+const USER_KEY = 'vida_user_id';
 
 const COLORS = ['sage', 'lavender', 'pink', 'peach', 'sky', 'mint'];
 
@@ -11,16 +12,6 @@ function relDate(d: number): string {
   const x = new Date();
   x.setDate(x.getDate() + d);
   return x.toISOString().split('T')[0];
-}
-
-function genLog(n: number): Record<string, boolean> {
-  const l: Record<string, boolean> = {};
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    l[d.toISOString().split('T')[0]] = i < n && Math.random() > 0.3;
-  }
-  return l;
 }
 
 function calcStreak(log: Record<string, boolean>): number {
@@ -34,41 +25,34 @@ function calcStreak(log: Record<string, boolean>): number {
   return s;
 }
 
-const defaultData = (): VidaData => ({
+const emptyData = (): VidaData => ({
   messages: [],
-  reminders: [
-    { id: 'r1', title: 'Call Mom about weekend', date: relDate(1), time: '14:00', done: false, createdAt: new Date().toISOString() },
-    { id: 'r2', title: 'Pick up dry cleaning', date: relDate(0), time: '17:00', done: false, createdAt: new Date().toISOString() },
-    { id: 'r3', title: 'Submit brief to Shaune', date: relDate(2), time: '09:00', done: false, createdAt: new Date().toISOString() },
-  ],
-  habits: [
-    { id: 'h1', name: 'Gym', icon: '💪', color: 'sage', log: genLog(7), streak: 3 },
-    { id: 'h2', name: 'Read 30 mins', icon: '📖', color: 'lavender', log: genLog(4), streak: 2 },
-    { id: 'h3', name: 'Vitamins', icon: '💊', color: 'pink', log: genLog(5), streak: 1 },
-  ],
-  events: [
-    { id: 'e1', title: "Sarah's Birthday", date: relDate(4), type: 'birthday', detail: 'Turning 28' },
-    { id: 'e2', title: 'Dentist', date: relDate(6), type: 'appointment', detail: '10:30 AM — Dr. Patel' },
-    { id: 'e3', title: 'Games Night', date: relDate(9), type: 'event', detail: 'At yours — 7 PM' },
-  ],
-  spending: [
-    { cat: 'Food', amount: 1200, budget: 2000 },
-    { cat: 'Transport', amount: 650, budget: 1000 },
-    { cat: 'Fun', amount: 600, budget: 800 },
-  ],
+  reminders: [],
+  habits: [],
+  events: [],
+  spending: [],
 });
 
-export function useVidaData() {
-  const [data, setData] = useState<VidaData>(defaultData());
+export function useVidaData(userId?: string | null) {
+  const [data, setData] = useState<VidaData>(emptyData());
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     try {
+      const storedUserId = localStorage.getItem(USER_KEY);
       const stored = localStorage.getItem(STORE_KEY);
-      if (stored) setData(JSON.parse(stored));
+      // If a userId is provided and it differs from stored, clear and start fresh
+      if (userId && storedUserId && storedUserId !== userId) {
+        localStorage.removeItem(STORE_KEY);
+        localStorage.setItem(USER_KEY, userId);
+        setData(emptyData());
+      } else {
+        if (userId) localStorage.setItem(USER_KEY, userId);
+        if (stored) setData(JSON.parse(stored));
+      }
     } catch { /* use defaults */ }
     setLoaded(true);
-  }, []);
+  }, [userId]);
 
   const save = useCallback((newData: VidaData) => {
     setData(newData);
