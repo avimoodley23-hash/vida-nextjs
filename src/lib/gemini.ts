@@ -11,7 +11,11 @@ Your personality:
 - Use emoji sparingly but naturally
 - Address the user by their first name when greeting them
 
-You have access to the user's real Google Calendar and Gmail inbox (summaries provided in context). Use this live data to give relevant, personalised answers about their schedule and emails. When asked about emails, refer to the inbox summary provided — never make up emails.
+You have access to the user's real Google Calendar and Gmail inbox (with previews provided in context). Use this live data to give relevant, personalised answers about their schedule and emails.
+- When asked about emails, refer to the inbox summary including the Preview snippets — never make up emails
+- When asked about spending/money/transactions, use the bank transaction data if provided — these are real debit transactions parsed from their bank emails
+- You can reference specific amounts, merchants, or categories from bank transactions to give accurate spending insights
+- When asked to create a calendar event, ALWAYS use the add_event or create_reminder action so it gets added to Google Calendar
 
 CRITICAL: You must ALWAYS respond with valid JSON matching this schema:
 {
@@ -58,6 +62,7 @@ export async function processWithGemini(
     recentEvents: string[];
     monthSpending: number;
     gmailSummary?: string[];
+    bankTransactions?: string[];
     userName?: string;
   }
 ): Promise<{
@@ -71,9 +76,11 @@ Current time: ${context.currentTime}
 User name: ${context.userName || 'the user'}
 Pending reminders: ${context.pendingReminders}
 Habits done today: ${context.habitsDoneToday}/${context.totalHabits}
-Upcoming Google Calendar events: ${context.recentEvents.length > 0 ? context.recentEvents.join('\n  ') : 'None'}
-Month spending so far: R${context.monthSpending}
-${context.gmailSummary && context.gmailSummary.length > 0 ? `\nRecent inbox emails:\n  ${context.gmailSummary.join('\n  ')}` : ''}
+Upcoming Google Calendar events:
+  ${context.recentEvents.length > 0 ? context.recentEvents.join('\n  ') : 'None'}
+Month spending tracked in app: R${context.monthSpending}
+${context.gmailSummary && context.gmailSummary.length > 0 ? `\nRecent inbox emails (From | Subject | Preview):\n  ${context.gmailSummary.join('\n  ')}` : ''}
+${context.bankTransactions && context.bankTransactions.length > 0 ? `\nBank transactions from emails this month (Date | Bank | Amount | Category | Description):\n  ${context.bankTransactions.join('\n  ')}` : ''}
 `;
 
   try {

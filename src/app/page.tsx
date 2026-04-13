@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useVidaData } from '@/lib/useVidaData';
 import { Send, Mic, MessageCircle, Bell, Check, Activity, Star, Calendar, CreditCard, Sun, Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X, LogOut } from 'lucide-react';
+import type { CalendarEvent } from '@/types';
 
 function HabitIcon({ name, size = 16 }: { name: string; size?: number }) {
   const n = name.toLowerCase();
@@ -55,8 +56,62 @@ export default function VidaApp() {
   const [rf, setRf] = useState({ title: '', date: '', time: '09:00' });
   const [hf, setHf] = useState({ name: '' });
   const [ef, setEf] = useState({ title: '', date: '', type: 'event' as 'birthday' | 'event' | 'appointment', detail: '' });
+  const [gcalEvents, setGcalEvents] = useState<CalendarEvent[]>([]);
+  const [bankToast, setBankToast] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const { data, loaded, addMessage, addReminder, toggleReminder, logHabit, toggleHabitDay, addHabit, addEvent, logSpending, clearMessages } = useVidaData(userEmail || undefined);
+
+  // Fetch real Google Calendar events for the Upcoming panel
+  useEffect(() => {
+    if (!accessToken) return;
+    fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(r => r.json())
+      .then(d => { if (d.events) setGcalEvents(d.events); })
+      .catch(() => {});
+  }, [accessToken]);
+
+  // Auto-detect bank transactions from email and log to spending
+  useEffect(() => {
+    if (!accessToken) return;
+    const processedKey = `vida_bank_processed_${userEmail}`;
+    const processed: string[] = (() => { try { return JSON.parse(localStorage.getItem(processedKey) || '[]'); } catch { return []; } })();
+
+    fetch('/api/emails', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (!d.transactions?.length) return;
+        const newTxns = d.transactions.filter((t: { emailId: string }) => !processed.includes(t.emailId));
+        if (!newTxns.length) return;
+        newTxns.forEach((t: { amount: number; category: string }) => logSpending(t.amount, t.category));
+        const ids = [...processed, ...newTxns.map((t: { emailId: string }) => t.emailId)];
+        try { localStorage.setItem(processedKey, JSON.stringify(ids.slice(-100))); } catch {}
+        setBankToast(`💳 Detected ${newTxns.length} bank transaction${newTxns.length > 1 ? 's' : ''} from your emails`);
+        setTimeout(() => setBankToast(null), 5000);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
+
+  // Browser notification permission + reminder check
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    const check = () => {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const now = new Date();
+      const nowDate = now.toISOString().split('T')[0];
+      const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      data.reminders
+        .filter(r => !r.done && r.date === nowDate && r.time === nowTime)
+        .forEach(r => {
+          new Notification(`⏰ ${r.title}`, { body: 'Tap to open Vida', icon: '/icons/icon-192.png' });
+        });
+    };
+    const interval = setInterval(check, 60_000);
+    return () => clearInterval(interval);
+  }, [status, data.reminders]);
 
   const scroll = useCallback(() => { setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100); }, []);
 
@@ -187,11 +242,24 @@ export default function VidaApp() {
   const today = rd(0);
   const hDone = data.habits.filter(h => h.log[today]).length;
   const pend = data.reminders.filter(r => !r.done);
-const bday = data.events.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(e.date) <= 5);
+
+  // Merge Google Calendar events with local events (dedupe by googleEventId or title+date)
+  const gcalIds = new Set(gcalEvents.map(e => e.googleEventId).filter(Boolean));
+  const localOnly = data.events.filter(e => !e.googleEventId || !gcalIds.has(e.googleEventId));
+  const allEvents = [...gcalEvents, ...localOnly].sort((a, b) => a.date.localeCompare(b.date));
+
+const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(e.date) <= 5);
   const hr = new Date().getHours();
 
   return (
     <div className="flex flex-col h-dvh max-w-[480px] mx-auto bg-vida-bg relative">
+      {/* Bank email toast */}
+      {bankToast && (
+        <div className="absolute top-4 left-4 right-4 z-50 bg-mint-dark text-white rounded-2xl px-4 py-3 text-sm font-semibold shadow-lg flex items-center justify-between gap-2 msg-pop">
+          <span>{bankToast}</span>
+          <button onClick={() => setBankToast(null)} className="opacity-70 hover:opacity-100"><X size={14} /></button>
+        </div>
+      )}
       {/* HEADER */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2 shrink-0">
         <div className="flex items-center gap-3">
@@ -259,7 +327,7 @@ const bday = data.events.find(e => e.type === 'birthday' && dt(e.date) >= 1 && d
             <button onClick={() => setPanel('upcoming')} className="bento-card bg-lavender-light text-lavender-dark rounded-2xl p-4 text-left min-h-[110px] flex flex-col">
               <Calendar size={26} className="mb-2 opacity-85" />
               <span className="font-bold text-[15px]">Upcoming</span>
-              <div className="flex flex-col gap-1 mt-1.5">{data.events.slice(0, 2).map(e => <div key={e.id} className="flex items-center gap-1.5 text-[11px]"><span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${e.type === 'birthday' ? 'bg-lavender text-lavender-dark' : 'bg-sky text-sky-dark'}`}>{e.type === 'birthday' ? 'Bday' : 'Event'}</span><span className="truncate">{e.title}</span></div>)}</div>
+              <div className="flex flex-col gap-1 mt-1.5">{allEvents.slice(0, 2).map(e => <div key={e.id} className="flex items-center gap-1.5 text-[11px]"><span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${e.type === 'birthday' ? 'bg-lavender text-lavender-dark' : 'bg-sky text-sky-dark'}`}>{e.type === 'birthday' ? 'Bday' : 'Event'}</span><span className="truncate">{e.title}</span></div>)}</div>
             </button>
             <button onClick={() => setPanel('chat')} className="bento-card bg-mint-light text-mint-dark rounded-2xl p-4 text-left min-h-[110px] flex flex-col">
               <CreditCard size={26} className="mb-2 opacity-85" />
@@ -371,14 +439,15 @@ const bday = data.events.find(e => e.type === 'birthday' && dt(e.date) >= 1 && d
       {panel === 'upcoming' && (
         <div className="flex-1 overflow-y-auto hide-scrollbar px-4 pb-8 pt-1">
           <p className="text-xs font-semibold text-vida-muted uppercase tracking-wider mb-2">Coming up</p>
-          {[...data.events].sort((a, b) => a.date.localeCompare(b.date)).map(e => (
+          {allEvents.map(e => (
             <div key={e.id} className={`rounded-2xl p-4 mb-2 ${e.type === 'birthday' ? 'bg-lavender-light text-lavender-dark' : e.type === 'appointment' ? 'bg-peach-light text-peach-dark' : 'bg-sky-light text-sky-dark'}`}>
               <div className="text-[11px] font-bold uppercase tracking-wider opacity-70">{fd(e.date)}</div>
               <div className="font-semibold text-[15px] mt-0.5">{e.title}</div>
               {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
+              {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
             </div>
           ))}
-          {data.events.length === 0 && <div className="text-center py-10 text-vida-muted"><div className="flex justify-center mb-2 opacity-40"><Calendar size={36} strokeWidth={1.5} /></div><div className="text-sm">No events yet!</div></div>}
+          {allEvents.length === 0 && <div className="text-center py-10 text-vida-muted"><div className="flex justify-center mb-2 opacity-40"><Calendar size={36} strokeWidth={1.5} /></div><div className="text-sm">No events — try asking Vida to create one!</div></div>}
           <button onClick={() => openAddForm('event')} className="w-full border-2 border-dashed border-vida-muted/25 rounded-2xl p-3.5 flex items-center justify-center gap-2 text-[13px] font-semibold text-vida-muted hover:border-vida-muted/50 hover:text-vida-secondary transition mt-1">
             <Plus size={15} /> New event
           </button>
