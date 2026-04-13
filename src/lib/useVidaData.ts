@@ -162,6 +162,39 @@ export function useVidaData(userId?: string | null) {
     });
   }, []);
 
+  const deleteReminder = useCallback((id: string) => {
+    setData(prev => {
+      const next = { ...prev, reminders: prev.reminders.filter(r => r.id !== id) };
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const deleteHabit = useCallback((id: string) => {
+    setData(prev => {
+      const next = { ...prev, habits: prev.habits.filter(h => h.id !== id) };
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const deleteEvent = useCallback((id: string) => {
+    setData(prev => {
+      const next = { ...prev, events: prev.events.filter(e => e.id !== id) };
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const setBudget = useCallback((category: string, budget: number) => {
+    setData(prev => {
+      const newSpending = prev.spending.map(s => s.cat === category ? { ...s, budget } : s);
+      const next = { ...prev, spending: newSpending };
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   const clearMessages = useCallback(() => {
     setData(prev => {
       const next = { ...prev, messages: [] };
@@ -177,11 +210,15 @@ export function useVidaData(userId?: string | null) {
     addMessage,
     addReminder,
     toggleReminder,
+    deleteReminder,
     logHabit,
     toggleHabitDay,
     addHabit,
+    deleteHabit,
     addEvent,
+    deleteEvent,
     logSpending,
+    setBudget,
     clearMessages,
   };
 }

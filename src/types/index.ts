@@ -57,7 +57,9 @@ export interface VidaData {
 export interface GeminiAction {
   action: 'create_reminder' | 'complete_reminder' | 'log_habit' | 'create_habit' |
           'log_spending' | 'add_event' | 'check_schedule' | 'check_habits' |
-          'check_spending' | 'greeting' | 'help' | 'suggestion' | 'general';
+          'check_spending' | 'check_email' | 'set_budget' |
+          'delete_reminder' | 'delete_habit' | 'delete_event' |
+          'greeting' | 'help' | 'suggestion' | 'general';
   params?: Record<string, string | number | boolean>;
   response: string;
 }

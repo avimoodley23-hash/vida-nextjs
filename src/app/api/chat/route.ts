@@ -6,7 +6,7 @@ import { getRecentEmails, getBankTransactions } from '@/lib/gmail';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, context, accessToken } = body;
+    const { message, context, accessToken, history } = body;
 
     if (!message) {
       return NextResponse.json({ error: 'No message provided' }, { status: 400 });
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       monthSpending: context?.monthSpending || 0,
       gmailSummary,
       bankTransactions: bankSummary,
-    });
+    }, history);
 
     // If action is to create a reminder/event and we have a token, also add to Google Calendar
     if (accessToken && (result.action === 'create_reminder' || result.action === 'add_event') && result.params) {

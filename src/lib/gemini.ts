@@ -16,19 +16,26 @@ You have access to the user's real Google Calendar and Gmail inbox (with preview
 - When asked about spending/money/transactions, use the bank transaction data if provided — these are real debit transactions parsed from their bank emails
 - You can reference specific amounts, merchants, or categories from bank transactions to give accurate spending insights
 - When asked to create a calendar event, ALWAYS use the add_event or create_reminder action so it gets added to Google Calendar
+- When the user wants to set a budget for a category, use the set_budget action
+- When the user wants to delete a reminder/habit/event, use the appropriate delete action
 
 CRITICAL: You must ALWAYS respond with valid JSON matching this schema:
 {
-  "action": one of ["create_reminder", "complete_reminder", "log_habit", "create_habit", "log_spending", "add_event", "check_schedule", "check_habits", "check_spending", "check_email", "greeting", "help", "suggestion", "general"],
+  "action": one of ["create_reminder", "complete_reminder", "log_habit", "create_habit", "log_spending", "add_event", "check_schedule", "check_habits", "check_spending", "check_email", "set_budget", "delete_reminder", "delete_habit", "delete_event", "greeting", "help", "suggestion", "general"],
   "params": { key-value pairs relevant to the action },
   "response": "your friendly response text to show the user"
 }
 
 Action-specific params:
 - create_reminder: { "title": string, "date": "YYYY-MM-DD", "time": "HH:MM" }
+- complete_reminder: { "title": string } (title or keyword of the reminder to mark done)
 - log_habit: { "habit_name": string }
 - create_habit: { "name": string, "icon": emoji }
+- delete_reminder: { "title": string } (keyword to identify the reminder)
+- delete_habit: { "name": string } (keyword to identify the habit)
+- delete_event: { "title": string } (keyword to identify the event)
 - log_spending: { "amount": number, "category": string, "description": string }
+- set_budget: { "category": string, "amount": number }
 - add_event: { "title": string, "date": "YYYY-MM-DD", "type": "birthday|event|appointment", "detail": string }
 - check_schedule: {} (summarise upcoming Google Calendar events from context)
 - check_habits: {}  
@@ -64,12 +71,17 @@ export async function processWithGemini(
     gmailSummary?: string[];
     bankTransactions?: string[];
     userName?: string;
-  }
+  },
+  history?: { role: 'user' | 'assistant'; text: string }[]
 ): Promise<{
   action: string;
   params: Record<string, string | number | boolean>;
   response: string;
 }> {
+  const historySection = history && history.length > 0
+    ? `\nRecent conversation (for context — maintain continuity):\n${history.slice(-8).map(m => `${m.role === 'user' ? 'User' : 'Vida'}: ${m.text.slice(0, 200)}`).join('\n')}`
+    : '';
+
   const contextString = `
 Current date: ${context.today}
 Current time: ${context.currentTime}
@@ -81,6 +93,7 @@ Upcoming Google Calendar events:
 Month spending tracked in app: R${context.monthSpending}
 ${context.gmailSummary && context.gmailSummary.length > 0 ? `\nRecent inbox emails (From | Subject | Preview):\n  ${context.gmailSummary.join('\n  ')}` : ''}
 ${context.bankTransactions && context.bankTransactions.length > 0 ? `\nBank transactions from emails this month (Date | Bank | Amount | Category | Description):\n  ${context.bankTransactions.join('\n  ')}` : ''}
+${historySection}
 `;
 
   try {

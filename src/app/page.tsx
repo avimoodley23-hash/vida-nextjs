@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useVidaData } from '@/lib/useVidaData';
-import { Send, Mic, MessageCircle, Bell, Check, Activity, Star, Calendar, CreditCard, Sun, Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X, LogOut } from 'lucide-react';
+import { Send, Mic, MessageCircle, Bell, Check, Activity, Star, Calendar, CreditCard, Sun, Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X, LogOut, Trash2 } from 'lucide-react';
 import type { CalendarEvent } from '@/types';
 
 function HabitIcon({ name, size = 16 }: { name: string; size?: number }) {
@@ -13,6 +13,18 @@ function HabitIcon({ name, size = 16 }: { name: string; size?: number }) {
   if (n.includes('vitamin') || n.includes('pill') || n.includes('supplement')) return <Pill size={size} />;
   return <Sparkles size={size} />;
 }
+
+function renderMarkdown(text: string) {
+  return text.split('\n').flatMap((line, li) => {
+    const parts = line.split(/\*\*(.*?)\*\*/g);
+    const nodes: React.ReactNode[] = parts.map((p, j) =>
+      j % 2 === 1 ? <strong key={j}>{p}</strong> : <span key={j}>{p}</span>
+    );
+    return li === 0 ? nodes : [<br key={`br-${li}`} />, ...nodes];
+  });
+}
+
+const HABIT_ICONS = ['🏋️','📚','🧘','💧','🛌','🏃','🍎','✍️','🎯','💊','🎵','🚴','🍵','🌱','💻','🎨','🙏','⭐','🎮','✦'];
 
 type Panel = 'home' | 'chat' | 'habits' | 'reminders' | 'upcoming';
 
@@ -54,20 +66,24 @@ export default function VidaApp() {
   const [recording, setRecording] = useState(false);
   const [addForm, setAddForm] = useState<'reminder' | 'habit' | 'event' | null>(null);
   const [rf, setRf] = useState({ title: '', date: '', time: '09:00' });
-  const [hf, setHf] = useState({ name: '' });
+  const [hf, setHf] = useState({ name: '', icon: '✦' });
   const [ef, setEf] = useState({ title: '', date: '', type: 'event' as 'birthday' | 'event' | 'appointment', detail: '' });
   const [gcalEvents, setGcalEvents] = useState<CalendarEvent[]>([]);
+  const [gcalLoading, setGcalLoading] = useState(true);
+  const [briefingDone, setBriefingDone] = useState(false);
   const [bankToast, setBankToast] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
-  const { data, loaded, addMessage, addReminder, toggleReminder, logHabit, toggleHabitDay, addHabit, addEvent, logSpending, clearMessages } = useVidaData(userEmail || undefined);
+  const { data, loaded, addMessage, addReminder, toggleReminder, deleteReminder, logHabit, toggleHabitDay, addHabit, deleteHabit, addEvent, deleteEvent, logSpending, setBudget, clearMessages } = useVidaData(userEmail || undefined);
 
   // Fetch real Google Calendar events for the Upcoming panel
   useEffect(() => {
-    if (!accessToken) return;
+    if (!accessToken) { setGcalLoading(false); return; }
+    setGcalLoading(true);
     fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${accessToken}` } })
       .then(r => r.json())
       .then(d => { if (d.events) setGcalEvents(d.events); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setGcalLoading(false));
   }, [accessToken]);
 
   // Auto-detect bank transactions from email and log to spending
@@ -116,13 +132,37 @@ export default function VidaApp() {
   const scroll = useCallback(() => { setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100); }, []);
 
   useEffect(() => {
-    if (panel === 'chat' && data.messages.length === 0 && loaded) {
-      addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — powered by Gemini AI. I'm connected to your Google Calendar and Gmail so I actually know what's going on in your life.\n\nJust type or talk naturally:\n• \"What's on my calendar this week?\"\n• \"Do I have any important emails?\"\n• \"Remind me to call the dentist tomorrow\"\n• \"Add gym to my habits\"`, time: new Date().toISOString() });
+    if (!loaded || briefingDone) return;
+    if (panel !== 'chat') return;
+    if (data.messages.length > 0) { setBriefingDone(true); return; }
+    setBriefingDone(true);
+    const today = rd(0);
+    const lastKey = `vida_briefing_${userEmail}`;
+    let lastDate = '';
+    try { lastDate = localStorage.getItem(lastKey) || ''; } catch {}
+    if (lastDate !== today && accessToken) {
+      try { localStorage.setItem(lastKey, today); } catch {}
+      setTyping(true); scroll();
+      fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Give me a friendly morning briefing — what have I got on today and this week, and anything important in my inbox?',
+          accessToken,
+          context: { today, currentTime: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }), pendingReminders: data.reminders.filter(r => !r.done).length, habitsDoneToday: data.habits.filter(h => h.log[today]).length, totalHabits: data.habits.length, recentEvents: [], monthSpending: data.spending.reduce((a, s) => a + s.amount, 0) },
+        }),
+      })
+        .then(r => r.json())
+        .then(r => { addMessage({ role: 'assistant', text: r.response, time: new Date().toISOString() }); })
+        .catch(() => { addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — your AI assistant connected to your Google Calendar and Gmail.\n\nAsk me anything:\n• "What's on my calendar?"\n• "Any important emails?"\n• "Remind me to call the dentist"`, time: new Date().toISOString() }); })
+        .finally(() => { setTyping(false); scroll(); });
+    } else {
+      addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — your AI assistant. What can I help you with?\n• "What's on my calendar?"\n• "Any important emails?"\n• "Remind me to..."`, time: new Date().toISOString() });
     }
-  }, [panel, loaded]); // eslint-disable-line
+  }, [panel, loaded, accessToken]); // eslint-disable-line
 
   async function send() {
     const text = input.trim(); if (!text) return;
+    const historySnapshot = data.messages.slice(-10);
     addMessage({ role: 'user', text, time: new Date().toISOString() });
     setInput(''); setTyping(true); scroll();
     try {
@@ -132,6 +172,7 @@ export default function VidaApp() {
         body: JSON.stringify({
           message: text,
           accessToken,
+          history: historySnapshot.map(m => ({ role: m.role, text: m.text })),
           context: {
             today, currentTime: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
             pendingReminders: data.reminders.filter(r => !r.done).length,
@@ -144,12 +185,28 @@ export default function VidaApp() {
       });
       const r = await res.json();
       if (r.action === 'create_reminder' && r.params) addReminder({ title: String(r.params.title || text), date: String(r.params.date || rd(1)), time: r.params.time ? String(r.params.time) : '09:00', done: false });
+      else if (r.action === 'complete_reminder' && r.params?.title) {
+        const match = data.reminders.find(rem => rem.title.toLowerCase().includes(String(r.params.title).toLowerCase()) && !rem.done);
+        if (match) toggleReminder(match.id);
+      }
+      else if (r.action === 'delete_reminder' && r.params?.title) {
+        const match = data.reminders.find(rem => rem.title.toLowerCase().includes(String(r.params.title).toLowerCase()));
+        if (match) deleteReminder(match.id);
+      }
+      else if (r.action === 'delete_habit' && r.params?.name) {
+        const match = data.habits.find(h => h.name.toLowerCase().includes(String(r.params.name).toLowerCase()));
+        if (match) deleteHabit(match.id);
+      }
+      else if (r.action === 'delete_event' && r.params?.title) {
+        const match = data.events.find(e => e.title.toLowerCase().includes(String(r.params.title).toLowerCase()));
+        if (match) deleteEvent(match.id);
+      }
       else if (r.action === 'log_habit' && r.params?.habit_name) logHabit(String(r.params.habit_name));
       else if (r.action === 'create_habit' && r.params?.name) addHabit(String(r.params.name), String(r.params.icon || '✨'));
       else if (r.action === 'log_spending' && r.params?.amount) logSpending(Number(r.params.amount), String(r.params.category || 'Other'));
+      else if (r.action === 'set_budget' && r.params?.category && r.params?.amount) setBudget(String(r.params.category), Number(r.params.amount));
       else if (r.action === 'add_event' && r.params) {
         addEvent({ title: String(r.params.title || ''), date: String(r.params.date || rd(7)), type: (r.params.type as 'birthday' | 'event' | 'appointment') || 'event', detail: r.params.detail ? String(r.params.detail) : undefined, googleEventId: r.params.googleEventId ? String(r.params.googleEventId) : undefined });
-        // Refresh the Upcoming panel so the new Google Calendar event shows immediately
         if (accessToken && r.params.googleEventId) {
           fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${accessToken}` } })
             .then(res => res.json())
@@ -181,13 +238,15 @@ export default function VidaApp() {
 
   function newChat() {
     clearMessages();
-    addMessage({ role: 'assistant', text: `Hey ${userName}! ☀️\n\nI'm **Vida** — powered by Gemini AI. I'm connected to your Google Calendar and Gmail so I actually know what's going on in your life.\n\nJust type or talk naturally:\n• \"What's on my calendar this week?\"\n• \"Do I have any important emails?\"\n• \"Remind me to call the dentist tomorrow\"\n• \"Add gym to my habits\"`, time: new Date().toISOString() });
+    setBriefingDone(false);
+    // Reset so next time chat opens it shows fresh greeting (not morning briefing again)
+    try { const lastKey = `vida_briefing_${userEmail}`; localStorage.removeItem(lastKey); } catch {}
   }
 
   function openAddForm(type: 'reminder' | 'habit' | 'event') {
     if (type === 'reminder') setRf({ title: '', date: rd(0), time: '09:00' });
     if (type === 'event') setEf({ title: '', date: rd(1), type: 'event', detail: '' });
-    if (type === 'habit') setHf({ name: '' });
+    if (type === 'habit') setHf({ name: '', icon: '✦' });
     setAddForm(type);
   }
 
@@ -199,7 +258,7 @@ export default function VidaApp() {
 
   function submitHabit() {
     if (!hf.name.trim()) return;
-    addHabit(hf.name.trim());
+    addHabit(hf.name.trim(), hf.icon);
     setAddForm(null);
   }
 
@@ -354,10 +413,25 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
                 ))}
               </div>
             </button>
-            <button onClick={() => setPanel('chat')} className="bento-card col-span-2 bg-sky-light text-sky-dark rounded-2xl p-4 flex items-center gap-3 min-h-[68px]">
-              <Sun size={28} className="shrink-0 opacity-75" />
-              <div className="text-left"><div className="font-bold text-[15px]">Your weekend is free!</div><div className="text-xs opacity-70">Maybe plan a braai or games night?</div></div>
-            </button>
+            {(() => {
+              const eventsToday = allEvents.filter(e => dt(e.date) === 0);
+              const eventsThisWeek = allEvents.filter(e => { const d = dt(e.date); return d >= 0 && d <= 6; });
+              const nextEvent = allEvents.find(e => dt(e.date) >= 0);
+              return (
+                <button onClick={() => setPanel('upcoming')} className="bento-card col-span-2 bg-sky-light text-sky-dark rounded-2xl p-4 flex items-center gap-3 min-h-[68px]">
+                  <Sun size={28} className="shrink-0 opacity-75" />
+                  <div className="text-left">
+                    {eventsToday.length > 0
+                      ? <><div className="font-bold text-[15px]">{eventsToday.length === 1 ? eventsToday[0].title : `${eventsToday.length} things today`}</div><div className="text-xs opacity-70">Today · tap to see all</div></>
+                      : eventsThisWeek.length > 0
+                      ? <><div className="font-bold text-[15px]">{eventsThisWeek.length} event{eventsThisWeek.length > 1 ? 's' : ''} this week</div><div className="text-xs opacity-70">Next: {nextEvent?.title}</div></>
+                      : <><div className="font-bold text-[15px]">Week looks free! 🎉</div><div className="text-xs opacity-70">Maybe plan a braai or games night?</div></>
+                    }
+                  </div>
+                  <ArrowRight size={18} className="ml-auto opacity-30 shrink-0" />
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -379,8 +453,9 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
           <div className="flex-1 overflow-y-auto hide-scrollbar px-4 py-3 flex flex-col gap-2.5">
             {data.messages.map((m, i) => (
               <div key={i} className={`msg-pop max-w-[82%] ${m.role === 'user' ? 'self-end' : 'self-start'}`}>
-                <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-vida-text text-vida-bg rounded-br-md' : 'bg-vida-warm text-vida-text rounded-bl-md shadow-sm'}`}
-                  dangerouslySetInnerHTML={{ __html: m.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
+                <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-vida-text text-vida-bg rounded-br-md' : 'bg-vida-warm text-vida-text rounded-bl-md shadow-sm'}`}>
+                  {renderMarkdown(m.text)}
+                </div>
                 <div className={`text-[10.5px] text-vida-muted mt-1 px-1 ${m.role === 'user' ? 'text-right' : ''}`}>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
               </div>
             ))}
@@ -403,10 +478,13 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
         <div className="flex-1 overflow-y-auto hide-scrollbar px-4 pb-8 pt-1">
           <p className="text-xs font-semibold text-vida-muted uppercase tracking-wider mb-2">This week</p>
           {data.habits.map(h => { const c = CM[h.color] || CM.sage; return (
-            <div key={h.id} className={`${c.light} ${c.dark} rounded-2xl p-4 mb-2.5`}>
+            <div key={h.id} className={`group ${c.light} ${c.dark} rounded-2xl p-4 mb-2.5`}>
               <div className="flex justify-between items-center">
                 <span className="font-bold text-[15px] flex items-center gap-2"><span className="opacity-70"><HabitIcon name={h.name} size={16} /></span>{h.name}</span>
-                {h.streak > 0 && <span className="text-[11px] font-bold bg-white/60 px-2.5 py-0.5 rounded-full flex items-center gap-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>{h.streak}d</span>}
+                <div className="flex items-center gap-1.5">
+                  {h.streak > 0 && <span className="text-[11px] font-bold bg-white/60 px-2.5 py-0.5 rounded-full flex items-center gap-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>{h.streak}d</span>}
+                  <button onClick={() => deleteHabit(h.id)} className="w-7 h-7 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-black/10 text-current transition" title="Delete habit"><Trash2 size={13} /></button>
+                </div>
               </div>
               <div className="flex gap-1.5 mt-3">{Array.from({ length: 7 }).map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); const k = d.toISOString().split('T')[0]; const f = h.log[k]; const day = d.toLocaleDateString('en-ZA', { weekday: 'short' }).charAt(0); return (
                 <button key={k} onClick={() => toggleHabitDay(h.id, k)} className={`flex-1 h-8 rounded-[10px] flex items-center justify-center text-[10px] font-semibold transition active:scale-90 ${f ? c.df : c.de} ${i === 6 ? 'ring-2 ring-vida-text/20 ring-offset-1' : ''}`}>{f ? <Check size={12} strokeWidth={3} /> : day}</button>
@@ -433,6 +511,7 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
                 <div key={r.id} className={`flex items-center gap-3 bg-vida-warm rounded-2xl p-3.5 mb-2 shadow-sm transition hover:translate-x-0.5 ${r.done ? 'opacity-40' : ''}`}>
                   <button onClick={() => toggleReminder(r.id)} className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center text-xs shrink-0 transition ${r.done ? 'border-sage bg-sage text-sage-dark' : 'border-vida-muted hover:border-sage-dark'}`}>{r.done && <Check size={12} />}</button>
                   <div className="flex-1 min-w-0"><div className={`font-semibold text-sm truncate ${r.done ? 'line-through' : ''}`}>{r.title}</div><div className="text-xs text-vida-muted mt-0.5">{fd(r.date)}{r.time ? ` · ${ft(r.time)}` : ''}</div></div>
+                  <button onClick={() => deleteReminder(r.id)} className="w-7 h-7 rounded-full flex items-center justify-center text-vida-muted hover:text-red-400 hover:bg-red-50 transition shrink-0"><Trash2 size={13} /></button>
                 </div>
               ))}
             </div>
@@ -448,12 +527,24 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
       {panel === 'upcoming' && (
         <div className="flex-1 overflow-y-auto hide-scrollbar px-4 pb-8 pt-1">
           <p className="text-xs font-semibold text-vida-muted uppercase tracking-wider mb-2">Coming up</p>
+          {gcalLoading && gcalEvents.length === 0 && (
+            <div className="flex flex-col gap-2 mb-2">
+              {[1,2,3].map(i => <div key={i} className="h-[76px] rounded-2xl bg-vida-warm animate-pulse" />)}
+            </div>
+          )}
           {allEvents.map(e => (
             <div key={e.id} className={`rounded-2xl p-4 mb-2 ${e.type === 'birthday' ? 'bg-lavender-light text-lavender-dark' : e.type === 'appointment' ? 'bg-peach-light text-peach-dark' : 'bg-sky-light text-sky-dark'}`}>
-              <div className="text-[11px] font-bold uppercase tracking-wider opacity-70">{fd(e.date)}</div>
-              <div className="font-semibold text-[15px] mt-0.5">{e.title}</div>
-              {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
-              {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-bold uppercase tracking-wider opacity-70">{fd(e.date)}</div>
+                  <div className="font-semibold text-[15px] mt-0.5 truncate">{e.title}</div>
+                  {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
+                  {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
+                </div>
+                {!e.googleEventId && (
+                  <button onClick={() => deleteEvent(e.id)} className="w-7 h-7 rounded-full flex items-center justify-center text-current opacity-40 hover:opacity-80 hover:bg-black/10 transition shrink-0 mt-0.5"><Trash2 size={13} /></button>
+                )}
+              </div>
             </div>
           ))}
           {allEvents.length === 0 && <div className="text-center py-10 text-vida-muted"><div className="flex justify-center mb-2 opacity-40"><Calendar size={36} strokeWidth={1.5} /></div><div className="text-sm">No events — try asking Vida to create one!</div></div>}
@@ -495,12 +586,18 @@ const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(
                   <button onClick={() => setAddForm(null)} className="w-8 h-8 rounded-full bg-vida-cream flex items-center justify-center text-vida-muted hover:text-vida-secondary transition"><X size={16} /></button>
                 </div>
                 <input
-                  className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[15px] outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 mb-4 transition placeholder:text-vida-muted"
+                  className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[15px] outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 mb-3 transition placeholder:text-vida-muted"
                   placeholder="e.g. Meditate, Run, Drink water..."
                   value={hf.name} onChange={e => setHf(p => ({ ...p, name: e.target.value }))}
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') submitHabit(); }}
                 />
+                <p className="text-xs font-semibold text-vida-muted mb-2">Pick an icon</p>
+                <div className="grid grid-cols-10 gap-1.5 mb-4">
+                  {HABIT_ICONS.map(icon => (
+                    <button key={icon} onClick={() => setHf(p => ({ ...p, icon }))} className={`h-9 rounded-xl text-[18px] flex items-center justify-center transition ${hf.icon === icon ? 'bg-vida-text' : 'bg-vida-warm hover:bg-vida-cream'}`}>{icon}</button>
+                  ))}
+                </div>
                 <button onClick={submitHabit} disabled={!hf.name.trim()} className="w-full bg-vida-text text-vida-bg rounded-2xl py-3.5 text-[15px] font-bold transition hover:opacity-90 disabled:opacity-30">Create Habit</button>
               </>
             )}
