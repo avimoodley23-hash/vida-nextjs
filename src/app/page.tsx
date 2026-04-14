@@ -8,9 +8,9 @@ import {
   Dumbbell, BookOpen, Pill, Sparkles, ArrowRight, Plus, X, LogOut,
   Trash2, Home, MessageCircle, ListTodo, ChevronRight, RefreshCw,
   Mail, AlertCircle, TrendingUp, Flame, Volume2, VolumeX, Repeat,
-  ChevronDown, ChevronUp, Pencil,
+  ChevronDown, ChevronUp, Pencil, Target,
 } from 'lucide-react';
-import type { CalendarEvent, VidaNotification } from '@/types';
+import type { CalendarEvent, VidaNotification, Goal } from '@/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,14 +95,18 @@ function NotifIcon({ type }: { type: VidaNotification['type'] }) {
 }
 
 type Panel = 'home' | 'chat' | 'tasks' | 'schedule' | 'notifications';
-type TaskTab = 'todos' | 'reminders' | 'habits';
+type TaskTab = 'todos' | 'reminders' | 'habits' | 'goals';
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function VidaApp() {
-  const { data: session, status } = useSession();
+  const { data: session, status, update: updateSession } = useSession();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accessToken = (session as any)?.accessToken as string | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workAccessToken = (session as any)?.workAccessToken as string | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workEmail = (session as any)?.workEmail as string | undefined;
   const userName = session?.user?.name?.split(' ')[0] || 'there';
   const userEmail = session?.user?.email || '';
 
@@ -119,13 +123,14 @@ export default function VidaApp() {
   const [scheduleTab, setScheduleTab] = useState<'calendar' | 'spending'>('calendar');
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-  const [addForm, setAddForm] = useState<'reminder' | 'habit' | 'event' | 'todo' | null>(null);
+  const [addForm, setAddForm] = useState<'reminder' | 'habit' | 'event' | 'todo' | 'goal' | null>(null);
   const [rf, setRf] = useState({ title: '', date: '', time: '09:00' });
   const [hf, setHf] = useState({ name: '', icon: '✦' });
   const [ef, setEf] = useState({ title: '', date: '', type: 'event' as 'birthday' | 'event' | 'appointment', detail: '' });
   const [tf, setTf] = useState({ title: '', scope: 'daily' as 'daily' | 'weekly' });
   const [gcalEvents, setGcalEvents] = useState<CalendarEvent[]>([]);
   const [gcalLoading, setGcalLoading] = useState(true);
+  const [workGcalEvents, setWorkGcalEvents] = useState<CalendarEvent[]>([]);
   const [briefingDone, setBriefingDone] = useState(false);
   const [bankToast, setBankToast] = useState<string | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
@@ -138,12 +143,13 @@ export default function VidaApp() {
     addEvent, deleteEvent, logSpending, setBudget, clearMessages,
     addTodo, toggleTodo, deleteTodo,
     setNotifications, markNotificationRead, markAllNotificationsRead,
+    addGoal, updateGoalProgress, deleteGoal, setLastWeeklyReview,
   } = useVidaData(userEmail || undefined);
 
   const unreadCount = data.notifications.filter(n => !n.read).length;
   const overBudget = data.spending.filter(s => s.budget > 0 && s.amount > s.budget);
 
-  // Fetch Google Calendar events
+  // Fetch Google Calendar events (personal + work)
   useEffect(() => {
     if (!accessToken) { setGcalLoading(false); return; }
     setGcalLoading(true);
@@ -153,6 +159,19 @@ export default function VidaApp() {
       .catch(() => {})
       .finally(() => setGcalLoading(false));
   }, [accessToken]);
+
+  // Fetch work account calendar separately
+  useEffect(() => {
+    if (!workAccessToken) { setWorkGcalEvents([]); return; }
+    fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${workAccessToken}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.events) {
+          setWorkGcalEvents(d.events.map((e: CalendarEvent) => ({ ...e, source: 'work' as const, id: 'work_' + e.id })));
+        }
+      })
+      .catch(() => {});
+  }, [workAccessToken]);
 
   // Auto-detect bank transactions from email
   useEffect(() => {
@@ -193,6 +212,7 @@ export default function VidaApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accessToken,
+          workAccessToken,
           spending: data.spending,
           habits: data.habits,
           today,
@@ -265,10 +285,16 @@ export default function VidaApp() {
     if (lastDate !== today && accessToken) {
       try { localStorage.setItem(lastKey, today); } catch {}
       setTyping(true); scroll();
+      const isMonday = new Date().getDay() === 1;
+      const weekKey = getWeekStart();
+      const briefingMsg = isMonday && data.lastWeeklyReview !== weekKey
+        ? 'Give me a friendly morning briefing with a weekly review — how did last week go with habits and spending? Then what\'s on today and this week, any important emails to flag?'
+        : 'Give me a friendly morning briefing — what have I got on today and this week, any important emails, and how are my habits going?';
+      if (isMonday) setLastWeeklyReview(weekKey);
       fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'Give me a friendly morning briefing — what have I got on today and this week, any important emails, and how are my habits going?',
+          message: briefingMsg,
           accessToken,
           context: buildContext(),
         }),
@@ -301,6 +327,8 @@ export default function VidaApp() {
       spending: data.spending,
       todosToday: activeTodosToday.map(t => `${t.done ? '✓' : '○'} ${t.title}`),
       todosWeekly: activeTodosWeekly.map(t => `${t.done ? '✓' : '○'} ${t.title}`),
+      goals: data.goals,
+      workAccessToken,
     };
   }
 
@@ -428,6 +456,21 @@ export default function VidaApp() {
         if (match) deleteTodo(match.id);
         break;
       }
+      case 'create_goal':
+        if (p.title) addGoal({
+          title: String(p.title),
+          target: Number(p.target || 1),
+          unit: String(p.unit || 'sessions'),
+          progress: 0,
+          category: (p.category as Goal['category']) || 'other',
+          deadline: p.deadline ? String(p.deadline) : undefined,
+        });
+        break;
+      case 'update_goal': {
+        const match = data.goals.find(g => g.title.toLowerCase().includes(String(p.title || '').toLowerCase()));
+        if (match) updateGoalProgress(match.id, Number(p.progress));
+        break;
+      }
     }
   }
 
@@ -447,6 +490,8 @@ export default function VidaApp() {
   }
 
   const [gcalAdding, setGcalAdding] = useState<string | null>(null);
+  const [tasksSync, setTasksSync] = useState(false);
+  const [gf, setGf] = useState({ title: '', target: '', unit: 'sessions', category: 'other' as Goal['category'], deadline: '' });
 
   async function addToGoogleCal(evt: NonNullable<import('@/types').ChatMessage['calendarEvent']>, msgIdx: number) {
     if (!accessToken) { addMessage({ role: 'assistant', text: "Sign in with Google to add to Google Calendar.", time: new Date().toISOString() }); return; }
@@ -479,6 +524,25 @@ export default function VidaApp() {
     window.open(`/api/ical?${params.toString()}`, '_blank');
   }
 
+  async function syncGoogleTasks() {
+    if (!accessToken || tasksSync) return;
+    setTasksSync(true);
+    try {
+      const res = await fetch('/api/tasks-sync', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const d = await res.json();
+      if (d.tasks?.length) {
+        let added = 0;
+        for (const task of d.tasks as { id: string; title: string }[]) {
+          const exists = data.todos.some(t => t.title.toLowerCase() === task.title.toLowerCase());
+          if (!exists && task.title) { addTodo(task.title, 'weekly'); added++; }
+        }
+        setBankToast(`✓ Synced ${added > 0 ? added : 'up-to-date'} ${added > 0 ? `task${added > 1 ? 's' : ''} from` : '—'} Google Tasks`);
+        setTimeout(() => setBankToast(null), 4000);
+      }
+    } catch { /* non-fatal */ }
+    setTasksSync(false);
+  }
+
   function voice() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const w = window as any;
@@ -489,7 +553,7 @@ export default function VidaApp() {
     rec.continuous = false; rec.interimResults = false; rec.lang = 'en-ZA';
     rec.onstart = () => setRecording(true);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rec.onresult = (e: any) => { setInput(e.results[0][0].transcript); setRecording(false); };
+    rec.onresult = (e: any) => { const t = e.results[0][0].transcript; setInput(t); setRecording(false); setTimeout(() => send(t), 50); };
     rec.onerror = rec.onend = () => setRecording(false);
     rec.start();
   }
@@ -499,11 +563,12 @@ export default function VidaApp() {
     try { localStorage.removeItem(`vida_briefing_${userEmail}`); } catch {}
   }
 
-  function openAddForm(type: 'reminder' | 'habit' | 'event' | 'todo') {
+  function openAddForm(type: 'reminder' | 'habit' | 'event' | 'todo' | 'goal') {
     if (type === 'reminder') setRf({ title: '', date: rd(0), time: '09:00' });
     if (type === 'event') setEf({ title: '', date: rd(1), type: 'event', detail: '' });
     if (type === 'habit') setHf({ name: '', icon: '✦' });
     if (type === 'todo') setTf({ title: '', scope: 'daily' });
+    if (type === 'goal') setGf({ title: '', target: '', unit: 'sessions', category: 'other', deadline: '' });
     setAddForm(type);
   }
 
@@ -541,7 +606,10 @@ export default function VidaApp() {
 
   const gcalIds = new Set(gcalEvents.map(e => e.googleEventId).filter(Boolean));
   const localOnly = data.events.filter(e => !e.googleEventId || !gcalIds.has(e.googleEventId));
-  const allEvents = [...gcalEvents, ...localOnly].sort((a, b) => a.date.localeCompare(b.date));
+  // Deduplicate work events that might also be in personal calendar (same title+date)
+  const personalKeys = new Set([...gcalEvents, ...localOnly].map(e => `${e.title}|${e.date}`));
+  const workOnly = workGcalEvents.filter(e => !personalKeys.has(`${e.title}|${e.date}`));
+  const allEvents = [...gcalEvents, ...localOnly, ...workOnly].sort((a, b) => a.date.localeCompare(b.date));
   const bday = allEvents.find(e => e.type === 'birthday' && dt(e.date) >= 1 && dt(e.date) <= 5);
   const hDone = data.habits.filter(h => h.log[today]).length;
   const pend = data.reminders.filter(r => !r.done);
@@ -683,6 +751,28 @@ export default function VidaApp() {
                   </button>
                 );
               })()}
+              {/* Work account card */}
+              {workEmail ? (
+                <div className="col-span-2 flex items-center gap-3 bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3">
+                  <div className="w-8 h-8 rounded-xl bg-sky-light text-sky-dark flex items-center justify-center text-sm shrink-0">🏢</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-bold truncate">{workEmail}</div>
+                    <div className="text-[11px] text-vida-muted">Work calendar & email connected</div>
+                  </div>
+                  <button onClick={() => updateSession({ clearWork: true })} className="text-[11px] font-semibold text-vida-muted hover:text-red-400 transition shrink-0">
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => signIn('google-work')} className="col-span-2 flex items-center gap-3 bg-vida-warm border border-dashed border-vida-muted/25 rounded-2xl px-4 py-3 text-vida-muted hover:bg-vida-cream transition text-left">
+                  <div className="w-8 h-8 rounded-xl bg-vida-cream flex items-center justify-center text-sm shrink-0">🏢</div>
+                  <div>
+                    <div className="text-[13px] font-semibold text-vida-secondary">Add work account</div>
+                    <div className="text-[11px] text-vida-muted">Connect work Gmail & Calendar</div>
+                  </div>
+                  <ArrowRight size={14} className="ml-auto opacity-40 shrink-0" />
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -800,7 +890,7 @@ export default function VidaApp() {
           <div className="h-full flex flex-col">
             {/* Sub-tabs */}
             <div className="flex gap-1 px-4 pb-2 shrink-0">
-              {(['todos', 'reminders', 'habits'] as TaskTab[]).map(t => (
+              {(['todos', 'reminders', 'habits', 'goals'] as TaskTab[]).map(t => (
                 <button key={t} onClick={() => setTaskTab(t)} className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition capitalize ${taskTab === t ? 'bg-vida-text text-vida-bg' : 'text-vida-muted hover:bg-vida-cream'}`}>
                   {t}
                 </button>
@@ -847,6 +937,11 @@ export default function VidaApp() {
                   <button onClick={() => openAddForm('todo')} className="w-full border-2 border-dashed border-vida-muted/25 rounded-2xl p-3.5 flex items-center justify-center gap-2 text-[13px] font-semibold text-vida-muted mt-1">
                     <Plus size={15} /> New todo
                   </button>
+                  {accessToken && (
+                    <button onClick={syncGoogleTasks} disabled={tasksSync} className="w-full border border-vida-cream rounded-2xl p-3 flex items-center justify-center gap-2 text-[12px] font-semibold text-vida-muted mt-2 hover:bg-vida-cream transition disabled:opacity-40">
+                      <RefreshCw size={13} className={tasksSync ? 'animate-spin' : ''} /> {tasksSync ? 'Syncing...' : 'Sync Google Tasks'}
+                    </button>
+                  )}
                 </>
               )}
 
@@ -903,6 +998,63 @@ export default function VidaApp() {
                   {data.habits.length === 0 && <div className="text-center py-10 text-vida-muted"><div className="flex justify-center mb-2 opacity-40"><Activity size={36} strokeWidth={1.5} /></div><div className="text-sm">No habits yet — ask Vida to add one!</div></div>}
                   <button onClick={() => openAddForm('habit')} className="w-full border-2 border-dashed border-vida-muted/25 rounded-2xl p-3.5 flex items-center justify-center gap-2 text-[13px] font-semibold text-vida-muted mt-1">
                     <Plus size={15} /> New habit
+                  </button>
+                </>
+              )}
+
+              {/* GOALS */}
+              {taskTab === 'goals' && (
+                <>
+                  {data.goals.length === 0 && (
+                    <div className="text-center py-10 text-vida-muted">
+                      <div className="flex justify-center mb-2 opacity-40"><Target size={36} strokeWidth={1.5} /></div>
+                      <div className="text-sm mb-1">No goals yet</div>
+                      <div className="text-xs opacity-60">Ask Vida to create one e.g. "Set a goal to save R5000"</div>
+                    </div>
+                  )}
+                  {data.goals.map(g => {
+                    const pct = g.target > 0 ? Math.min(Math.round((g.progress / g.target) * 100), 100) : 0;
+                    const done = g.progress >= g.target;
+                    const catColors: Record<Goal['category'], string> = {
+                      savings: 'bg-mint-light text-mint-dark',
+                      fitness: 'bg-sage-light text-sage-dark',
+                      habit: 'bg-lavender-light text-lavender-dark',
+                      learning: 'bg-sky-light text-sky-dark',
+                      other: 'bg-peach-light text-peach-dark',
+                    };
+                    return (
+                      <div key={g.id} className={`rounded-2xl p-4 mb-3 ${done ? 'bg-sage-light' : 'bg-vida-warm'} shadow-sm`}>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="font-bold text-[15px] truncate">{g.title}</span>
+                              {done && <span className="text-[10px] font-bold text-sage-dark bg-sage/30 px-2 py-0.5 rounded-full">Done!</span>}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-vida-muted">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${catColors[g.category]}`}>{g.category}</span>
+                              {g.deadline && <span>{fd(g.deadline)}</span>}
+                            </div>
+                          </div>
+                          <button onClick={() => deleteGoal(g.id)} className="w-7 h-7 rounded-full flex items-center justify-center text-vida-muted hover:text-red-400 transition shrink-0"><Trash2 size={13} /></button>
+                        </div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <div className="flex-1 h-2.5 rounded-full bg-vida-cream overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${done ? 'bg-sage-dark' : pct > 80 ? 'bg-mint-dark' : 'bg-lavender-dark'}`} style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-[12px] font-bold text-vida-text shrink-0">{g.progress}/{g.target} {g.unit}</span>
+                        </div>
+                        <div className="flex gap-1.5 mt-2">
+                          {[Math.round(g.target * 0.25), Math.round(g.target * 0.5), Math.round(g.target * 0.75), g.target].map(val => (
+                            <button key={val} onClick={() => updateGoalProgress(g.id, val)} className={`flex-1 py-1.5 rounded-xl text-[11px] font-semibold transition ${g.progress >= val ? 'bg-vida-text text-vida-bg' : 'bg-vida-cream text-vida-muted'}`}>
+                              {val}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button onClick={() => openAddForm('goal')} className="w-full border-2 border-dashed border-vida-muted/25 rounded-2xl p-3.5 flex items-center justify-center gap-2 text-[13px] font-semibold text-vida-muted mt-1">
+                    <Plus size={15} /> New goal
                   </button>
                 </>
               )}
@@ -1017,7 +1169,8 @@ export default function VidaApp() {
                             {e.time && <div className="text-[11px] font-bold uppercase tracking-wider opacity-70 mb-0.5">{ft(e.time)}</div>}
                             <div className="font-semibold text-[15px] truncate">{e.title}</div>
                             {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
-                            {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
+                            {e.source === 'work' && <div className="text-[10px] opacity-60 mt-1">🏢 Work calendar</div>}
+                            {e.googleEventId && e.source !== 'work' && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
                           </div>
                           {!e.googleEventId && (
                             <button onClick={() => deleteEvent(e.id)} className="w-7 h-7 rounded-full flex items-center justify-center opacity-40 hover:opacity-80 transition shrink-0"><Trash2 size={13} /></button>
@@ -1272,6 +1425,56 @@ export default function VidaApp() {
                   </div>
                   <input className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[14px] outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 mb-4 transition placeholder:text-vida-muted" placeholder="Details (optional)" value={ef.detail} onChange={e => setEf(p => ({ ...p, detail: e.target.value }))} />
                   <button onClick={() => { if (ef.title.trim() && ef.date) { addEvent({ title: ef.title.trim(), date: ef.date, type: ef.type, detail: ef.detail || undefined }); setAddForm(null); } }} disabled={!ef.title.trim() || !ef.date} className="w-full bg-vida-text text-vida-bg rounded-2xl py-3.5 text-[15px] font-bold disabled:opacity-30">Add Event</button>
+                </>
+              )}
+
+              {addForm === 'goal' && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-[17px] font-bold">New Goal</h2>
+                    <button onClick={() => setAddForm(null)} className="w-8 h-8 rounded-full bg-vida-cream flex items-center justify-center text-vida-muted"><X size={16} /></button>
+                  </div>
+                  <input
+                    className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[15px] outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 mb-3 transition placeholder:text-vida-muted"
+                    placeholder='e.g. Save R5000, Run 50km'
+                    value={gf.title} onChange={e => setGf(p => ({ ...p, title: e.target.value }))}
+                    autoFocus
+                  />
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="number" inputMode="decimal"
+                      className="flex-1 bg-vida-warm border border-vida-cream rounded-2xl px-3 py-3 text-[14px] outline-none focus:border-sage transition text-vida-text placeholder:text-vida-muted"
+                      placeholder="Target (e.g. 5000)"
+                      value={gf.target} onChange={e => setGf(p => ({ ...p, target: e.target.value }))}
+                    />
+                    <input
+                      className="flex-1 bg-vida-warm border border-vida-cream rounded-2xl px-3 py-3 text-[14px] outline-none focus:border-sage transition text-vida-text placeholder:text-vida-muted"
+                      placeholder="Unit (R, km, books…)"
+                      value={gf.unit} onChange={e => setGf(p => ({ ...p, unit: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex gap-1.5 mb-3 flex-wrap">
+                    {(['savings', 'fitness', 'habit', 'learning', 'other'] as Goal['category'][]).map(cat => (
+                      <button key={cat} onClick={() => setGf(p => ({ ...p, category: cat }))} className={`px-3 py-1.5 rounded-full text-[12px] font-semibold capitalize transition ${gf.category === cat ? 'bg-vida-text text-vida-bg' : 'bg-vida-cream text-vida-muted'}`}>{cat}</button>
+                    ))}
+                  </div>
+                  <input
+                    type="date"
+                    className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[14px] outline-none focus:border-sage transition text-vida-text mb-4"
+                    value={gf.deadline} onChange={e => setGf(p => ({ ...p, deadline: e.target.value }))}
+                  />
+                  <button
+                    onClick={() => {
+                      if (gf.title.trim() && gf.target) {
+                        addGoal({ title: gf.title.trim(), target: Number(gf.target), unit: gf.unit || 'units', progress: 0, category: gf.category, deadline: gf.deadline || undefined });
+                        setAddForm(null);
+                      }
+                    }}
+                    disabled={!gf.title.trim() || !gf.target}
+                    className="w-full bg-vida-text text-vida-bg rounded-2xl py-3.5 text-[15px] font-bold disabled:opacity-30"
+                  >
+                    Create Goal
+                  </button>
                 </>
               )}
             </div>

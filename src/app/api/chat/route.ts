@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { processWithGemini } from '@/lib/gemini';
 import { getUpcomingEvents, deleteCalendarEvent } from '@/lib/google-calendar';
 import { getRecentEmails, getBankTransactions, getEmailBody, sendEmail } from '@/lib/gmail';
+import { getWeather, weatherToContext } from '@/lib/weather';
 
 // In-memory context cache per access token (5 min TTL)
 interface CachedContext {
@@ -23,7 +24,7 @@ function getCached(token: string): CachedContext | null {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, context, accessToken, history } = body;
+    const { message, context, accessToken, workAccessToken, history } = body;
 
     if (!message) return NextResponse.json({ error: 'No message provided' }, { status: 400 });
 
@@ -31,6 +32,10 @@ export async function POST(req: NextRequest) {
     let gmailSummary: string[] = [];
     let gmailRaw: CachedContext['gmailRaw'] = [];
     let bankSummary: string[] = [];
+
+    // Fetch weather (uses Next.js fetch cache internally — 30 min revalidate)
+    const weatherData = await getWeather().catch(() => null);
+    const weatherContext = weatherData ? weatherToContext(weatherData) : undefined;
 
     if (accessToken) {
       const cached = getCached(accessToken);
@@ -73,6 +78,45 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Merge work account data (calendar + email)
+    if (workAccessToken) {
+      const workCached = getCached(workAccessToken);
+      let workEvents: string[] = [];
+      let workEmails: string[] = [];
+      let workRaw: CachedContext['gmailRaw'] = [];
+      if (workCached) {
+        workEvents = workCached.calendarEvents;
+        workEmails = workCached.gmailSummary;
+        workRaw = workCached.gmailRaw;
+      } else {
+        const [wEvents, wEmails] = await Promise.allSettled([
+          getUpcomingEvents(workAccessToken, 14),
+          getRecentEmails(workAccessToken, 15),
+        ]);
+        if (wEvents.status === 'fulfilled') {
+          workEvents = wEvents.value.slice(0, 10).map(e =>
+            `[Work] ${e.date}${e.time ? ' ' + e.time : ''} — ${e.title}${e.detail ? ` (${e.detail})` : ''}`
+          );
+        }
+        if (wEmails.status === 'fulfilled') {
+          workRaw = wEmails.value.map(e => ({ id: 'w_' + e.id, from: e.from, subject: `[Work] ${e.subject}`, snippet: e.snippet }));
+          workEmails = wEmails.value.map(e =>
+            `[w_${e.id}] [Work] ${e.from} | ${e.subject}${e.snippet ? ` | ${e.snippet.slice(0, 100)}` : ''}`
+          );
+        }
+        contextCache.set(workAccessToken, { calendarEvents: workEvents, gmailSummary: workEmails, gmailRaw: workRaw, fetchedAt: Date.now() });
+      }
+      calendarEvents = [...calendarEvents, ...workEvents];
+      gmailSummary = [...gmailSummary, ...workEmails];
+      gmailRaw = [...gmailRaw, ...workRaw];
+    }
+
+    // Build goals context from client-provided goals
+    const goalsContext: string[] = (context?.goals || []).map(
+      (g: { title: string; progress: number; target: number; unit: string; deadline?: string; category: string }) =>
+        `${g.title}: ${g.progress}/${g.target} ${g.unit}${g.deadline ? ` (due ${g.deadline})` : ''} [${g.category}]`
+    );
+
     // Build spending breakdown for context
     const spendingBreakdown = (context?.spending || []).map(
       (s: { cat: string; amount: number; budget: number }) =>
@@ -93,6 +137,8 @@ export async function POST(req: NextRequest) {
       bankTransactions: bankSummary,
       todosToday: context?.todosToday || [],
       todosWeekly: context?.todosWeekly || [],
+      goalsContext,
+      weatherContext,
     }, history);
 
     // Handle read_email: fetch full body and re-process
@@ -131,6 +177,20 @@ export async function POST(req: NextRequest) {
           body: String(result.params.body || ''),
           threadId: result.params.threadId ? String(result.params.threadId) : undefined,
           inReplyTo: result.params.inReplyTo ? String(result.params.inReplyTo) : undefined,
+        },
+      });
+    }
+
+    // For suggest_schedule: return as calendarEvent so user can confirm and add
+    if (result.action === 'suggest_schedule' && result.params?.title) {
+      return NextResponse.json({
+        ...result,
+        calendarEvent: {
+          title: String(result.params.title),
+          date: String(result.params.suggestedDate || ''),
+          time: result.params.suggestedTime ? String(result.params.suggestedTime) : undefined,
+          type: 'event' as const,
+          detail: result.params.reason ? String(result.params.reason) : undefined,
         },
       });
     }

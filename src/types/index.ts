@@ -26,6 +26,7 @@ export interface CalendarEvent {
   type: 'birthday' | 'event' | 'appointment';
   detail?: string;
   googleEventId?: string;
+  source?: 'personal' | 'work'; // which Google account
 }
 
 export interface SpendingEntry {
@@ -82,6 +83,17 @@ export interface VidaNotification {
   read: boolean;
 }
 
+export interface Goal {
+  id: string;
+  title: string;
+  target: number;
+  unit: string; // 'R', 'km', 'sessions', 'days', etc.
+  progress: number;
+  deadline?: string; // YYYY-MM-DD
+  category: 'savings' | 'fitness' | 'habit' | 'learning' | 'other';
+  createdAt: string;
+}
+
 export interface VidaData {
   messages: ChatMessage[];
   reminders: Reminder[];
@@ -91,7 +103,9 @@ export interface VidaData {
   spendingEntries: SpendingEntry[];
   todos: Todo[];
   notifications: VidaNotification[];
+  goals: Goal[];
   lastResetMonth?: string; // YYYY-MM — for monthly spending reset
+  lastWeeklyReview?: string; // YYYY-MM-DD — for weekly review trigger
 }
 
 export interface GeminiAction {
@@ -103,6 +117,8 @@ export interface GeminiAction {
     | 'set_budget' | 'delete_reminder' | 'delete_habit' | 'delete_event'
     | 'create_todo' | 'complete_todo' | 'delete_todo' | 'list_todos'
     | 'read_email' | 'draft_email'
+    | 'create_goal' | 'update_goal' | 'check_goals'
+    | 'suggest_schedule'
     | 'greeting' | 'help' | 'suggestion' | 'general';
   params?: Record<string, string | number | boolean>;
   response: string;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { VidaData, Reminder, Habit, CalendarEvent, SpendingSummary, SpendingEntry, ChatMessage, Todo, VidaNotification } from '@/types';
+import type { VidaData, Reminder, Habit, CalendarEvent, SpendingSummary, SpendingEntry, ChatMessage, Todo, VidaNotification, Goal } from '@/types';
 
 const STORE_KEY = 'vida_data';
 const USER_KEY = 'vida_user_id';
@@ -74,6 +74,7 @@ const emptyData = (): VidaData => ({
   spendingEntries: [],
   todos: [],
   notifications: [],
+  goals: [],
   lastResetMonth: currentMonth(),
 });
 
@@ -84,6 +85,7 @@ function migrateData(raw: Partial<VidaData>): VidaData {
     spendingEntries: raw.spendingEntries || [],
     todos: raw.todos || [],
     notifications: raw.notifications || [],
+    goals: raw.goals || [],
   };
 }
 
@@ -345,6 +347,41 @@ export function useVidaData(userId?: string | null) {
     });
   }, []);
 
+  // ── Goals ──
+
+  const addGoal = useCallback((g: Omit<Goal, 'id' | 'createdAt'>) => {
+    setData(prev => {
+      const goal: Goal = { ...g, id: 'g' + Date.now(), createdAt: new Date().toISOString() };
+      const next = { ...prev, goals: [...prev.goals, goal] };
+      persist(next);
+      return next;
+    });
+  }, []);
+
+  const updateGoalProgress = useCallback((id: string, progress: number) => {
+    setData(prev => {
+      const next = { ...prev, goals: prev.goals.map(g => g.id === id ? { ...g, progress } : g) };
+      persist(next);
+      return next;
+    });
+  }, []);
+
+  const deleteGoal = useCallback((id: string) => {
+    setData(prev => {
+      const next = { ...prev, goals: prev.goals.filter(g => g.id !== id) };
+      persist(next);
+      return next;
+    });
+  }, []);
+
+  const setLastWeeklyReview = useCallback((date: string) => {
+    setData(prev => {
+      const next = { ...prev, lastWeeklyReview: date };
+      persist(next);
+      return next;
+    });
+  }, []);
+
   return {
     data, loaded, save,
     addMessage, addReminder, toggleReminder, deleteReminder,
@@ -352,5 +389,6 @@ export function useVidaData(userId?: string | null) {
     addEvent, deleteEvent, logSpending, setBudget, clearMessages,
     addTodo, toggleTodo, deleteTodo,
     setNotifications, markNotificationRead, markAllNotificationsRead,
+    addGoal, updateGoalProgress, deleteGoal, setLastWeeklyReview,
   };
 }

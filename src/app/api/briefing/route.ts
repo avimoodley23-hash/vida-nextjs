@@ -2,28 +2,54 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUpcomingEvents } from '@/lib/google-calendar';
 import { getRecentEmails } from '@/lib/gmail';
 import { generateBriefingNotifications } from '@/lib/gemini';
+import { getWeather, weatherToContext } from '@/lib/weather';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { accessToken, spending, habits, today, currentTime, userName } = body;
+    const { accessToken, workAccessToken, spending, habits, today, currentTime, userName } = body;
 
     if (!accessToken) return NextResponse.json({ error: 'No access token' }, { status: 401 });
 
     const todayStr = today || new Date().toISOString().split('T')[0];
 
-    const [events, emails] = await Promise.allSettled([
+    const [events, emails, weatherData] = await Promise.allSettled([
       getUpcomingEvents(accessToken, 14),
       getRecentEmails(accessToken, 10),
+      getWeather(),
     ]);
 
-    const calendarEvents = events.status === 'fulfilled'
+    const weatherContext = weatherData.status === 'fulfilled' && weatherData.value
+      ? weatherToContext(weatherData.value)
+      : undefined;
+
+    let calendarEvents = events.status === 'fulfilled'
       ? events.value.map(e => `${e.date}${e.time ? ' ' + e.time : ''} — ${e.title}${e.detail ? ` (${e.detail})` : ''}`)
       : [];
 
-    const gmailSummary = emails.status === 'fulfilled'
+    let gmailSummary = emails.status === 'fulfilled'
       ? emails.value.map(e => `${e.from} | ${e.subject}${e.snippet ? ` | ${e.snippet.slice(0, 100)}` : ''}`)
       : [];
+
+    // Merge work account data if present
+    if (workAccessToken) {
+      const [wEvents, wEmails] = await Promise.allSettled([
+        getUpcomingEvents(workAccessToken, 14),
+        getRecentEmails(workAccessToken, 10),
+      ]);
+      if (wEvents.status === 'fulfilled') {
+        calendarEvents = [
+          ...calendarEvents,
+          ...wEvents.value.map(e => `[Work] ${e.date}${e.time ? ' ' + e.time : ''} — ${e.title}${e.detail ? ` (${e.detail})` : ''}`),
+        ];
+      }
+      if (wEmails.status === 'fulfilled') {
+        gmailSummary = [
+          ...gmailSummary,
+          ...wEmails.value.map(e => `[Work] ${e.from} | ${e.subject}${e.snippet ? ` | ${e.snippet.slice(0, 100)}` : ''}`),
+        ];
+      }
+    }
 
     // Spending breakdown with budget comparison
     const spendingBreakdown: string[] = (spending || []).map(
@@ -51,6 +77,7 @@ export async function POST(req: NextRequest) {
       gmailSummary,
       spendingBreakdown,
       habitsSummary,
+      weatherContext,
     });
 
     return NextResponse.json({ notifications });
