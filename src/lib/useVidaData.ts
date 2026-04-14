@@ -214,7 +214,7 @@ export function useVidaData(userId?: string | null) {
     });
   }, []);
 
-  const addHabit = useCallback((name: string, icon: string = '✨') => {
+  const addHabit = useCallback((name: string, icon: string = 'sparkles') => {
     setData(prev => {
       const habit: Habit = {
         id: 'h' + Date.now(), name, icon,

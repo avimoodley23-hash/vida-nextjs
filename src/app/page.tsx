@@ -9,19 +9,31 @@ import {
   Trash2, Home, MessageCircle, ListTodo, ChevronRight, RefreshCw,
   Mail, AlertCircle, TrendingUp, Flame, Volume2, VolumeX, Repeat,
   ChevronDown, ChevronUp, Pencil, Target,
+  Droplets, Moon, Music, Bike, Coffee, Leaf, Laptop, Palette, Heart, Star, Gamepad2, Wind,
 } from 'lucide-react';
 import type { CalendarEvent, VidaNotification, Goal } from '@/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number }>> = {
+  dumbbell: Dumbbell, book: BookOpen, wind: Wind, droplets: Droplets, moon: Moon,
+  activity: Activity, leaf: Leaf, pencil: Pencil, target: Target, pill: Pill,
+  music: Music, bike: Bike, coffee: Coffee, sprout: Leaf, laptop: Laptop,
+  palette: Palette, heart: Heart, star: Star, gamepad: Gamepad2, sparkles: Sparkles,
+};
+
 function HabitIcon({ name, icon, size = 16 }: { name: string; icon?: string; size?: number }) {
-  // Use stored emoji if it looks like an emoji (not the default '✦')
-  if (icon && icon !== '✦' && icon !== '✨' && /\p{Emoji}/u.test(icon)) {
-    return <span style={{ fontSize: size }}>{icon}</span>;
+  if (icon && ICON_MAP[icon]) {
+    const Icon = ICON_MAP[icon];
+    return <Icon size={size} />;
   }
   const n = name.toLowerCase();
   if (n.includes('gym') || n.includes('workout') || n.includes('exercise')) return <Dumbbell size={size} />;
   if (n.includes('read')) return <BookOpen size={size} />;
+  if (n.includes('meditat') || n.includes('breath')) return <Wind size={size} />;
+  if (n.includes('water') || n.includes('drink')) return <Droplets size={size} />;
+  if (n.includes('sleep') || n.includes('rest')) return <Moon size={size} />;
+  if (n.includes('run') || n.includes('walk') || n.includes('step')) return <Activity size={size} />;
   if (n.includes('vitamin') || n.includes('pill') || n.includes('supplement')) return <Pill size={size} />;
   return <Sparkles size={size} />;
 }
@@ -47,7 +59,15 @@ function renderMarkdown(text: string) {
   });
 }
 
-const HABIT_ICONS = ['🏋️','📚','🧘','💧','🛌','🏃','🍎','✍️','🎯','💊','🎵','🚴','🍵','🌱','💻','🎨','🙏','⭐','🎮','✦'];
+const HABIT_ICONS: { key: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: 'dumbbell', Icon: Dumbbell }, { key: 'book', Icon: BookOpen }, { key: 'wind', Icon: Wind },
+  { key: 'droplets', Icon: Droplets }, { key: 'moon', Icon: Moon }, { key: 'activity', Icon: Activity },
+  { key: 'leaf', Icon: Leaf }, { key: 'pencil', Icon: Pencil }, { key: 'target', Icon: Target },
+  { key: 'pill', Icon: Pill }, { key: 'music', Icon: Music }, { key: 'bike', Icon: Bike },
+  { key: 'coffee', Icon: Coffee }, { key: 'laptop', Icon: Laptop }, { key: 'palette', Icon: Palette },
+  { key: 'heart', Icon: Heart }, { key: 'star', Icon: Star }, { key: 'gamepad', Icon: Gamepad2 },
+  { key: 'flame', Icon: Flame }, { key: 'sparkles', Icon: Sparkles },
+];
 
 const CM: Record<string, { light: string; dark: string; df: string; de: string }> = {
   sage:     { light: 'bg-sage-light',     dark: 'text-sage-dark',     df: 'bg-sage text-sage-dark',         de: 'bg-sage-dark/10 text-sage-dark/40' },
@@ -126,7 +146,7 @@ export default function VidaApp() {
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [addForm, setAddForm] = useState<'reminder' | 'habit' | 'event' | 'todo' | 'goal' | null>(null);
   const [rf, setRf] = useState({ title: '', date: '', time: '09:00' });
-  const [hf, setHf] = useState({ name: '', icon: '✦' });
+  const [hf, setHf] = useState({ name: '', icon: 'sparkles' });
   const [ef, setEf] = useState({ title: '', date: '', type: 'event' as 'birthday' | 'event' | 'appointment', detail: '' });
   const [tf, setTf] = useState({ title: '', scope: 'daily' as 'daily' | 'weekly' });
   const [gcalEvents, setGcalEvents] = useState<CalendarEvent[]>([]);
@@ -188,7 +208,7 @@ export default function VidaApp() {
         newTxns.forEach((t: { amount: number; category: string }) => logSpending(t.amount, t.category));
         const ids = [...processed, ...newTxns.map((t: { emailId: string }) => t.emailId)];
         try { localStorage.setItem(processedKey, JSON.stringify(ids.slice(-100))); } catch {}
-        setBankToast(`💳 Detected ${newTxns.length} bank transaction${newTxns.length > 1 ? 's' : ''} from your emails`);
+        setBankToast(`Detected ${newTxns.length} bank transaction${newTxns.length > 1 ? 's' : ''} from your emails`);
         setTimeout(() => setBankToast(null), 5000);
       })
       .catch(() => {});
@@ -265,7 +285,7 @@ export default function VidaApp() {
         const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         data.reminders
           .filter(r => !r.done && r.date === nowDate && r.time === nowTime)
-          .forEach(r => new Notification(`⏰ ${r.title}`, { body: 'Tap to open Vida', icon: '/icon-192.png' }));
+          .forEach(r => new Notification(`Reminder: ${r.title}`, { body: 'Tap to open Vida', icon: '/icon-192.png' }));
       }
     };
     const interval = setInterval(check, 60_000);
@@ -404,7 +424,7 @@ export default function VidaApp() {
         if (p.habit_name) logHabit(String(p.habit_name));
         break;
       case 'create_habit':
-        if (p.name) addHabit(String(p.name), String(p.icon || '✨'));
+        if (p.name) addHabit(String(p.name), String(p.icon || 'sparkles'));
         break;
       case 'delete_habit': {
         const match = data.habits.find(h => h.name.toLowerCase().includes(String(p.name || '').toLowerCase()));
@@ -1417,7 +1437,7 @@ export default function VidaApp() {
                   </div>
                   <input className="w-full bg-vida-warm border border-vida-cream rounded-2xl px-4 py-3 text-[15px] outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 mb-3 transition placeholder:text-vida-muted" placeholder="e.g. Meditate, Run, Drink water..." value={hf.name} onChange={e => setHf(p => ({ ...p, name: e.target.value }))} autoFocus onKeyDown={e => { if (e.key === 'Enter' && hf.name.trim()) { addHabit(hf.name.trim(), hf.icon); setAddForm(null); } }} />
                   <p className="text-xs font-semibold text-vida-muted mb-2">Pick an icon</p>
-                  <div className="grid grid-cols-10 gap-1.5 mb-4">{HABIT_ICONS.map(icon => (<button key={icon} onClick={() => setHf(p => ({ ...p, icon }))} className={`h-9 rounded-xl text-[18px] flex items-center justify-center transition ${hf.icon === icon ? 'bg-vida-text' : 'bg-vida-warm'}`}>{icon}</button>))}</div>
+                  <div className="grid grid-cols-10 gap-1.5 mb-4">{HABIT_ICONS.map(({ key, Icon }) => (<button key={key} onClick={() => setHf(p => ({ ...p, icon: key }))} className={`h-9 rounded-xl flex items-center justify-center transition ${hf.icon === key ? 'bg-vida-text text-vida-bg' : 'bg-vida-warm text-vida-text'}`}><Icon size={18} /></button>))}</div>
                   <button onClick={() => { if (hf.name.trim()) { addHabit(hf.name.trim(), hf.icon); setAddForm(null); } }} disabled={!hf.name.trim()} className="w-full bg-vida-text text-vida-bg rounded-2xl py-3.5 text-[15px] font-bold disabled:opacity-30">Create Habit</button>
                 </>
               )}
