@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { supabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 
 export async function GET() {
   const session = await auth();
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const supabase = getSupabase();
+  if (!supabase) return NextResponse.json({ data: null, updatedAt: null });
 
   const userId = session.user.email;
   const { data, error } = await supabase
@@ -16,7 +19,6 @@ export async function GET() {
     .single();
 
   if (error && error.code !== 'PGRST116') {
-    // PGRST116 = row not found, which is fine for new users
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -28,6 +30,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const supabase = getSupabase();
+  if (!supabase) return NextResponse.json({ ok: true }); // graceful no-op if not configured
 
   const userId = session.user.email;
   const body = await req.json();
