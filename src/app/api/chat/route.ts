@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processWithGemini } from '@/lib/gemini';
-import { createCalendarEvent, getUpcomingEvents, deleteCalendarEvent } from '@/lib/google-calendar';
+import { getUpcomingEvents, deleteCalendarEvent } from '@/lib/google-calendar';
 import { getRecentEmails, getBankTransactions, getEmailBody, sendEmail } from '@/lib/gmail';
 
 // In-memory context cache per access token (5 min TTL)
@@ -135,23 +135,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Create calendar event for reminders/events
-    if (accessToken && (result.action === 'create_reminder' || result.action === 'add_event') && result.params) {
-      try {
-        const calResult = await createCalendarEvent(accessToken, {
-          title: String(result.params.title || ''),
+    // For add_event: return event details so the client can show calendar add buttons
+    if (result.action === 'add_event' && result.params?.title) {
+      return NextResponse.json({
+        ...result,
+        calendarEvent: {
+          title: String(result.params.title),
           date: String(result.params.date || ''),
           time: result.params.time ? String(result.params.time) : undefined,
-          description: 'Created by Vida',
-        });
-        if (calResult.success) {
-          result.response += ' Added to your Google Calendar.';
-          result.params.googleEventId = calResult.eventId || '';
-          // Invalidate calendar cache
-          const cached = contextCache.get(accessToken);
-          if (cached) contextCache.delete(accessToken);
-        }
-      } catch { /* non-fatal */ }
+          type: String(result.params.type || 'event'),
+          detail: result.params.detail ? String(result.params.detail) : undefined,
+        },
+      });
     }
 
     // Delete calendar event

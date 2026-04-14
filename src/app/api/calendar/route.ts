@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUpcomingEvents, getBirthdays } from '@/lib/google-calendar';
+import { getUpcomingEvents, getBirthdays, createCalendarEvent } from '@/lib/google-calendar';
 
 export async function GET(req: NextRequest) {
   const accessToken = req.headers.get('authorization')?.replace('Bearer ', '');
@@ -22,5 +22,20 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Calendar API error:', error);
     return NextResponse.json({ error: 'Failed to fetch calendar data' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { accessToken, title, date, time, description } = body;
+    if (!accessToken || !title || !date) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+    const result = await createCalendarEvent(accessToken, { title, date, time, description: description || 'Created by Vida' });
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error('Calendar create error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to create event' }, { status: 500 });
   }
 }

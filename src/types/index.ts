@@ -53,6 +53,13 @@ export interface ChatMessage {
     threadId?: string;
     inReplyTo?: string;
   };
+  calendarEvent?: {
+    title: string;
+    date: string;
+    time?: string;
+    type: 'birthday' | 'event' | 'appointment';
+    detail?: string;
+  };
 }
 
 export interface Todo {

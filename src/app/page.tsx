@@ -304,7 +304,7 @@ export default function VidaApp() {
     };
   }
 
-  async function typeOut(text: string, draftEmail?: import('@/types').ChatMessage['draftEmail']) {
+  async function typeOut(text: string, draftEmail?: import('@/types').ChatMessage['draftEmail'], calendarEvent?: import('@/types').ChatMessage['calendarEvent']) {
     const chunkSize = text.length > 300 ? 15 : 1;
     const delay = text.length > 300 ? 25 : 14;
     let current = '';
@@ -315,7 +315,7 @@ export default function VidaApp() {
       await new Promise(r => setTimeout(r, delay));
     }
     setStreamingText('');
-    addMessage({ role: 'assistant', text, time: new Date().toISOString(), draftEmail });
+    addMessage({ role: 'assistant', text, time: new Date().toISOString(), draftEmail, calendarEvent });
     if (ttsEnabled) speak(text);
     scroll();
   }
@@ -339,7 +339,7 @@ export default function VidaApp() {
       const r = await res.json();
       handleAction(r);
       setTyping(false);
-      await typeOut(r.response, r.draftEmail);
+      await typeOut(r.response, r.draftEmail, r.calendarEvent);
     } catch {
       setTyping(false);
       await typeOut("Couldn't reach the AI. Check your GEMINI_API_KEY!");
@@ -444,6 +444,39 @@ export default function VidaApp() {
       addMessage({ role: 'assistant', text: "Failed to send. Try again?", time: new Date().toISOString() });
     }
     scroll();
+  }
+
+  const [gcalAdding, setGcalAdding] = useState<string | null>(null);
+
+  async function addToGoogleCal(evt: NonNullable<import('@/types').ChatMessage['calendarEvent']>, msgIdx: number) {
+    if (!accessToken) { addMessage({ role: 'assistant', text: "Sign in with Google to add to Google Calendar.", time: new Date().toISOString() }); return; }
+    setGcalAdding(String(msgIdx));
+    try {
+      const res = await fetch('/api/calendar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken, title: evt.title, date: evt.date, time: evt.time, description: evt.detail || 'Created by Vida' }),
+      });
+      const r = await res.json();
+      if (r.success) {
+        addMessage({ role: 'assistant', text: `Added "${evt.title}" to your Google Calendar!`, time: new Date().toISOString() });
+        // Refresh gcal events
+        fetch('/api/calendar?days=30', { headers: { Authorization: `Bearer ${accessToken}` } })
+          .then(res => res.json()).then(d => { if (d.events) setGcalEvents(d.events); }).catch(() => {});
+      } else {
+        addMessage({ role: 'assistant', text: "Couldn't add to Google Calendar. You may need to sign out and back in to grant calendar access.", time: new Date().toISOString() });
+      }
+    } catch {
+      addMessage({ role: 'assistant', text: "Failed to add to Google Calendar. Try again?", time: new Date().toISOString() });
+    }
+    setGcalAdding(null);
+    scroll();
+  }
+
+  function saveToIphoneCal(evt: NonNullable<import('@/types').ChatMessage['calendarEvent']>) {
+    const params = new URLSearchParams({ title: evt.title, date: evt.date });
+    if (evt.time) params.set('time', evt.time);
+    if (evt.detail) params.set('detail', evt.detail);
+    window.open(`/api/ical?${params.toString()}`, '_blank');
   }
 
   function voice() {
@@ -693,6 +726,32 @@ export default function VidaApp() {
                       <button onClick={() => sendDraftEmail(m.draftEmail!)} className="w-full bg-sky-dark text-white rounded-xl py-2 text-[13px] font-bold">
                         Send →
                       </button>
+                    </div>
+                  )}
+                  {/* Calendar event add buttons */}
+                  {m.calendarEvent && (
+                    <div className="mt-2 bg-sage/20 text-vida-text rounded-2xl p-3.5 text-sm">
+                      <div className="text-[11px] font-bold uppercase tracking-wider opacity-70 mb-1.5">Add to Calendar</div>
+                      <div className="text-xs font-semibold mb-0.5">{m.calendarEvent.title}</div>
+                      <div className="text-xs opacity-70 mb-3">
+                        {new Date(m.calendarEvent.date + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        {m.calendarEvent.time ? ` at ${m.calendarEvent.time}` : ''}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => addToGoogleCal(m.calendarEvent!, i)}
+                          disabled={gcalAdding === String(i)}
+                          className="flex-1 bg-vida-text text-vida-bg rounded-xl py-2 text-[12px] font-bold disabled:opacity-50"
+                        >
+                          {gcalAdding === String(i) ? '...' : '📅 Google Calendar'}
+                        </button>
+                        <button
+                          onClick={() => saveToIphoneCal(m.calendarEvent!)}
+                          className="flex-1 bg-vida-warm border border-vida-cream text-vida-text rounded-xl py-2 text-[12px] font-bold"
+                        >
+                          📱 iPhone Calendar
+                        </button>
+                      </div>
                     </div>
                   )}
                   <div className={`flex items-center gap-2 mt-1 px-1 ${m.role === 'user' ? 'justify-end' : ''}`}>
