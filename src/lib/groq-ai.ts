@@ -2,10 +2,14 @@ import OpenAI from 'openai';
 import { SYSTEM_PROMPT } from './gemini';
 
 // Groq is OpenAI-API-compatible — no extra package needed
-const client = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY!,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+let client: OpenAI | null = null;
+function getClient() {
+  if (!client) client = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY!,
+    baseURL: 'https://api.groq.com/openai/v1',
+  });
+  return client;
+}
 
 const MODEL = 'llama-3.3-70b-versatile';
 
@@ -68,7 +72,7 @@ ${historySection}
 `;
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
       model: MODEL,
       messages: [
         {
@@ -150,7 +154,7 @@ Return ONLY a JSON array, no other text:
 [{"type":"calendar_prep"|"spending"|"habit"|"email"|"general","title":"max 40 chars","body":"specific actionable detail, max 120 chars","urgency":"high"|"medium"|"low"}]`;
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
       model: MODEL,
       messages: [{ role: 'user', content: userContent }],
       temperature: 0.5,

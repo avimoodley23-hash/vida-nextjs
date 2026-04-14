@@ -1,7 +1,11 @@
 import OpenAI from 'openai';
 import { SYSTEM_PROMPT } from './gemini';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+let client: OpenAI | null = null;
+function getClient() {
+  if (!client) client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  return client;
+}
 
 export async function processWithOpenAI(
   userMessage: string,
@@ -62,7 +66,7 @@ ${historySection}
 `;
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
@@ -144,7 +148,7 @@ Return ONLY a JSON array, no other text:
 [{"type":"calendar_prep"|"spending"|"habit"|"email"|"general","title":"max 40 chars","body":"specific actionable detail, max 120 chars","urgency":"high"|"medium"|"low"}]`;
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: userContent }],
       temperature: 0.5,
