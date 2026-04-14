@@ -113,9 +113,12 @@ export default function VidaApp() {
   const [streamingText, setStreamingText] = useState('');
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [budgetModal, setBudgetModal] = useState<string | null>(null); // category name
+  const [budgetModal, setBudgetModal] = useState<string | null>(null);
   const [budgetInput, setBudgetInput] = useState('');
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [scheduleTab, setScheduleTab] = useState<'calendar' | 'spending'>('calendar');
+  const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
+  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [addForm, setAddForm] = useState<'reminder' | 'habit' | 'event' | 'todo' | null>(null);
   const [rf, setRf] = useState({ title: '', date: '', time: '09:00' });
   const [hf, setHf] = useState({ name: '', icon: '✦' });
@@ -848,85 +851,178 @@ export default function VidaApp() {
           </div>
         )}
 
-        {/* SCHEDULE — Events + Spending */}
-        {panel === 'schedule' && (
-          <div className="h-full overflow-y-auto hide-scrollbar px-4 pb-4 pt-1">
-            {/* Spending */}
-            {data.spending.length > 0 && (
-              <>
-                <p className="text-xs font-semibold text-vida-muted uppercase tracking-wider mb-2">Spending this month</p>
-                <div className="bg-vida-warm rounded-2xl p-4 mb-4 shadow-sm">
+        {/* SCHEDULE — Calendar + Spending */}
+        {panel === 'schedule' && (() => {
+          // Calendar grid helpers
+          const { year, month } = calMonth;
+          const firstDow = new Date(year, month, 1).getDay(); // 0=Sun
+          const daysInMonth = new Date(year, month + 1, 0).getDate();
+          const startOffset = firstDow === 0 ? 6 : firstDow - 1; // Mon-first
+          const cells: (number | null)[] = [
+            ...Array(startOffset).fill(null),
+            ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+          ];
+          while (cells.length % 7 !== 0) cells.push(null);
+
+          const monthLabel = new Date(year, month, 1).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+          const todayFull = new Date().toISOString().split('T')[0];
+
+          function dateStr(day: number) {
+            return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          }
+
+          function eventsOnDay(day: number) {
+            return allEvents.filter(e => e.date === dateStr(day));
+          }
+
+          const selectedEvents = allEvents.filter(e => e.date === selectedDate);
+
+          const DOW = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+          return (
+            <div className="h-full flex flex-col">
+              {/* Sub-tabs */}
+              <div className="flex gap-1 px-4 pb-2 shrink-0">
+                {(['calendar', 'spending'] as const).map(t => (
+                  <button key={t} onClick={() => setScheduleTab(t)} className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition capitalize ${scheduleTab === t ? 'bg-vida-text text-vida-bg' : 'text-vida-muted hover:bg-vida-cream'}`}>{t}</button>
+                ))}
+              </div>
+
+              {scheduleTab === 'calendar' && (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {/* Month navigation */}
+                  <div className="flex items-center justify-between px-4 mb-3 shrink-0">
+                    <button onClick={() => setCalMonth(p => { const d = new Date(p.year, p.month - 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-vida-cream text-vida-secondary transition">
+                      <ChevronRight size={18} className="rotate-180" />
+                    </button>
+                    <span className="font-bold text-[15px]">{monthLabel}</span>
+                    <button onClick={() => setCalMonth(p => { const d = new Date(p.year, p.month + 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-vida-cream text-vida-secondary transition">
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+
+                  {/* Day-of-week headers */}
+                  <div className="grid grid-cols-7 px-3 mb-1 shrink-0">
+                    {DOW.map((d, i) => (
+                      <div key={i} className="text-center text-[11px] font-bold text-vida-muted py-1">{d}</div>
+                    ))}
+                  </div>
+
+                  {/* Calendar grid */}
+                  <div className="grid grid-cols-7 px-3 gap-y-1 shrink-0">
+                    {cells.map((day, i) => {
+                      if (!day) return <div key={i} />;
+                      const ds = dateStr(day);
+                      const isToday = ds === todayFull;
+                      const isSelected = ds === selectedDate;
+                      const evts = eventsOnDay(day);
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedDate(ds)}
+                          className={`flex flex-col items-center py-1.5 rounded-2xl transition ${isSelected ? 'bg-vida-text' : isToday ? 'bg-vida-cream' : 'hover:bg-vida-warm'}`}
+                        >
+                          <span className={`text-[14px] font-semibold leading-none mb-1 ${isSelected ? 'text-vida-bg' : isToday ? 'text-vida-text' : 'text-vida-text'}`}>
+                            {day}
+                          </span>
+                          <div className="flex gap-0.5 h-[6px] items-center">
+                            {evts.slice(0, 3).map((e, j) => (
+                              <div key={j} className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-vida-bg/60' : e.type === 'birthday' ? 'bg-lavender-dark' : e.type === 'appointment' ? 'bg-peach-dark' : 'bg-sky-dark'}`} />
+                            ))}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected day events */}
+                  <div className="flex-1 overflow-y-auto hide-scrollbar px-4 pt-3 pb-4 mt-2 border-t border-vida-cream">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <p className="text-xs font-bold text-vida-muted uppercase tracking-wider">
+                        {selectedDate === todayFull ? 'Today' : new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'short' })}
+                      </p>
+                      <button onClick={() => openAddForm('event')} className="flex items-center gap-1 text-[11px] font-semibold text-vida-muted hover:text-vida-secondary px-2.5 py-1 rounded-full hover:bg-vida-cream transition">
+                        <Plus size={12} /> Add
+                      </button>
+                    </div>
+                    {gcalLoading && gcalEvents.length === 0 && selectedDate === todayFull && (
+                      <div className="h-16 rounded-2xl bg-vida-warm animate-pulse" />
+                    )}
+                    {selectedEvents.length === 0 && (
+                      <p className="text-sm text-vida-muted text-center py-6 opacity-60">Nothing on this day</p>
+                    )}
+                    {selectedEvents.map(e => (
+                      <div key={e.id} className={`rounded-2xl p-4 mb-2 ${e.type === 'birthday' ? 'bg-lavender-light text-lavender-dark' : e.type === 'appointment' ? 'bg-peach-light text-peach-dark' : 'bg-sky-light text-sky-dark'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            {e.time && <div className="text-[11px] font-bold uppercase tracking-wider opacity-70 mb-0.5">{ft(e.time)}</div>}
+                            <div className="font-semibold text-[15px] truncate">{e.title}</div>
+                            {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
+                            {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
+                          </div>
+                          {!e.googleEventId && (
+                            <button onClick={() => deleteEvent(e.id)} className="w-7 h-7 rounded-full flex items-center justify-center opacity-40 hover:opacity-80 transition shrink-0"><Trash2 size={13} /></button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {scheduleTab === 'spending' && (
+                <div className="flex-1 overflow-y-auto hide-scrollbar px-4 pb-4">
+                  {data.spending.length === 0 && (
+                    <div className="text-center py-10 text-vida-muted">
+                      <div className="flex justify-center mb-2 opacity-40"><CreditCard size={36} strokeWidth={1.5} /></div>
+                      <div className="text-sm">No spending tracked yet — ask Vida to log a purchase!</div>
+                    </div>
+                  )}
                   {data.spending.map(s => {
                     const entries = (data.spendingEntries || []).filter(e => e.category === s.cat);
                     const isExpanded = expandedCategory === s.cat;
                     return (
-                      <div key={s.cat} className="mb-3 last:mb-0">
-                        <div className="flex justify-between items-center text-sm font-semibold mb-1">
-                          <button onClick={() => setExpandedCategory(isExpanded ? null : s.cat)} className="flex items-center gap-1.5 hover:opacity-70 transition">
-                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                            <span>{s.cat}</span>
+                      <div key={s.cat} className="bg-vida-warm rounded-2xl p-4 mb-3 shadow-sm">
+                        <div className="flex justify-between items-center mb-2">
+                          <button onClick={() => setExpandedCategory(isExpanded ? null : s.cat)} className="flex items-center gap-1.5 font-bold text-[15px] hover:opacity-70 transition">
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            {s.cat}
                           </button>
                           <div className="flex items-center gap-2">
-                            <span className={s.amount > s.budget && s.budget > 0 ? 'text-red-500' : ''}>
+                            <span className={`font-semibold text-sm ${s.amount > s.budget && s.budget > 0 ? 'text-red-500' : ''}`}>
                               R{s.amount}{s.budget > 0 ? ` / R${s.budget}` : ''}
-                              {s.amount > s.budget && s.budget > 0 && <span className="ml-1">⚠️</span>}
+                              {s.amount > s.budget && s.budget > 0 && ' ⚠️'}
                             </span>
-                            <button onClick={() => { setBudgetModal(s.cat); setBudgetInput(String(s.budget || '')); }} className="text-vida-muted hover:text-vida-secondary transition" title="Set budget">
+                            <button onClick={() => { setBudgetModal(s.cat); setBudgetInput(String(s.budget || '')); }} className="w-7 h-7 rounded-full flex items-center justify-center text-vida-muted hover:bg-vida-cream transition">
                               <Pencil size={12} />
                             </button>
                           </div>
                         </div>
                         {s.budget > 0 && (
-                          <div className="h-2 rounded-full bg-vida-cream overflow-hidden mb-1.5">
+                          <div className="h-2 rounded-full bg-vida-cream overflow-hidden mb-2">
                             <div className={`h-full rounded-full transition-all ${s.amount > s.budget ? 'bg-red-400' : s.amount > s.budget * 0.8 ? 'bg-amber-400' : 'bg-mint-dark'}`} style={{ width: `${Math.min(Math.round(s.amount / Math.max(s.budget, 1) * 100), 100)}%` }} />
                           </div>
                         )}
-                        {isExpanded && entries.length > 0 && (
-                          <div className="mt-2 pl-2 border-l-2 border-vida-cream flex flex-col gap-1.5">
-                            {entries.slice(-10).reverse().map(e => (
-                              <div key={e.id} className="flex justify-between text-[12px]">
+                        {isExpanded && (
+                          <div className="border-t border-vida-cream pt-2.5 flex flex-col gap-2">
+                            {entries.length === 0 && <p className="text-[12px] text-vida-muted">No entries yet</p>}
+                            {entries.slice(-15).reverse().map(e => (
+                              <div key={e.id} className="flex justify-between items-baseline text-[13px]">
                                 <span className="text-vida-secondary truncate flex-1">{e.description || e.category}</span>
                                 <span className="font-semibold text-vida-text ml-2 shrink-0">R{e.amount}</span>
-                                <span className="text-vida-muted ml-2 shrink-0">{e.date.slice(5)}</span>
+                                <span className="text-[11px] text-vida-muted ml-2 shrink-0">{e.date.slice(5)}</span>
                               </div>
                             ))}
                           </div>
-                        )}
-                        {isExpanded && entries.length === 0 && (
-                          <p className="text-[12px] text-vida-muted pl-2 mt-1">No entries yet</p>
                         )}
                       </div>
                     );
                   })}
                 </div>
-              </>
-            )}
-            {/* Calendar events */}
-            <p className="text-xs font-semibold text-vida-muted uppercase tracking-wider mb-2">Upcoming</p>
-            {gcalLoading && gcalEvents.length === 0 && (
-              <div className="flex flex-col gap-2 mb-2">{[1,2,3].map(i => <div key={i} className="h-[76px] rounded-2xl bg-vida-warm animate-pulse" />)}</div>
-            )}
-            {allEvents.map(e => (
-              <div key={e.id} className={`rounded-2xl p-4 mb-2 ${e.type === 'birthday' ? 'bg-lavender-light text-lavender-dark' : e.type === 'appointment' ? 'bg-peach-light text-peach-dark' : 'bg-sky-light text-sky-dark'}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-bold uppercase tracking-wider opacity-70">{fd(e.date)}{e.time ? ` · ${ft(e.time)}` : ''}</div>
-                    <div className="font-semibold text-[15px] mt-0.5 truncate">{e.title}</div>
-                    {e.detail && <div className="text-xs opacity-65 mt-0.5">{e.detail}</div>}
-                    {e.googleEventId && <div className="text-[10px] opacity-40 mt-1">📅 Google Calendar</div>}
-                  </div>
-                  {!e.googleEventId && (
-                    <button onClick={() => deleteEvent(e.id)} className="w-7 h-7 rounded-full flex items-center justify-center text-current opacity-40 hover:opacity-80 transition shrink-0 mt-0.5"><Trash2 size={13} /></button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {allEvents.length === 0 && <div className="text-center py-8 text-vida-muted"><div className="flex justify-center mb-2 opacity-40"><Calendar size={36} strokeWidth={1.5} /></div><div className="text-sm">No events — ask Vida to create one!</div></div>}
-            <button onClick={() => openAddForm('event')} className="w-full border-2 border-dashed border-vida-muted/25 rounded-2xl p-3.5 flex items-center justify-center gap-2 text-[13px] font-semibold text-vida-muted mt-1">
-              <Plus size={15} /> New event
-            </button>
-          </div>
-        )}
+              )}
+            </div>
+          );
+        })()}
 
         {/* NOTIFICATIONS */}
         {panel === 'notifications' && (
