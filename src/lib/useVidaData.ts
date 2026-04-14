@@ -102,6 +102,8 @@ export function useVidaData(userId?: string | null) {
   const [data, setData] = useState<VidaData>(emptyData());
   const [loaded, setLoaded] = useState(false);
   const syncingRef = useRef(false);
+  const userIdRef = useRef(userId);
+  useEffect(() => { userIdRef.current = userId; }, [userId]);
 
   // Debounced Supabase sync — fires 2s after last save
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,10 +174,10 @@ export function useVidaData(userId?: string | null) {
     return () => { cancelled = true; };
   }, [userId]);
 
-  const persist = (newData: VidaData) => {
+  const persist = useCallback((newData: VidaData) => {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(newData)); } catch {}
-    if (userId) syncToSupabase(newData);
-  };
+    if (userIdRef.current) syncToSupabase(newData);
+  }, [syncToSupabase]);
 
   const save = useCallback((newData: VidaData) => {
     setData(newData);
