@@ -1,9 +1,111 @@
 import { google } from 'googleapis';
+import type { gmail_v1 } from 'googleapis';
 
 function getGmailClient(accessToken: string) {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
   return google.gmail({ version: 'v1', auth });
+}
+
+function decodeBase64(data: string): string {
+  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractBodyFromPart(part: gmail_v1.Schema$MessagePart): string {
+  if (part.mimeType === 'text/plain' && part.body?.data) {
+    return decodeBase64(part.body.data);
+  }
+  if (part.mimeType === 'text/html' && part.body?.data) {
+    return stripHtml(decodeBase64(part.body.data));
+  }
+  if (part.parts) {
+    // Prefer plain text
+    for (const p of part.parts) {
+      if (p.mimeType === 'text/plain' && p.body?.data) return decodeBase64(p.body.data);
+    }
+    for (const p of part.parts) {
+      if (p.mimeType === 'text/html' && p.body?.data) return stripHtml(decodeBase64(p.body.data));
+    }
+    for (const p of part.parts) {
+      const nested = extractBodyFromPart(p);
+      if (nested) return nested;
+    }
+  }
+  return '';
+}
+
+export async function getEmailBody(accessToken: string, emailId: string): Promise<{ body: string; from: string; subject: string; date: string }> {
+  const gmail = getGmailClient(accessToken);
+  try {
+    const msg = await gmail.users.messages.get({ userId: 'me', id: emailId, format: 'full' });
+    const payload = msg.data.payload;
+    if (!payload) return { body: '', from: '', subject: '', date: '' };
+
+    const headers = payload.headers || [];
+    const get = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+    let body = '';
+    if (payload.body?.data) {
+      body = decodeBase64(payload.body.data);
+    } else {
+      body = extractBodyFromPart(payload);
+    }
+
+    return {
+      body: body.slice(0, 4000),
+      from: get('From'),
+      subject: get('Subject'),
+      date: get('Date'),
+    };
+  } catch (error) {
+    console.error('Email body fetch error:', error);
+    return { body: '', from: '', subject: '', date: '' };
+  }
+}
+
+export async function sendEmail(
+  accessToken: string,
+  params: { to: string; subject: string; body: string; threadId?: string; inReplyTo?: string }
+): Promise<{ success: boolean; messageId?: string }> {
+  const gmail = getGmailClient(accessToken);
+  const { to, subject, body, threadId, inReplyTo } = params;
+
+  const headerLines = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset=utf-8',
+    'MIME-Version: 1.0',
+  ];
+  if (inReplyTo) {
+    headerLines.push(`In-Reply-To: ${inReplyTo}`);
+    headerLines.push(`References: ${inReplyTo}`);
+  }
+
+  const raw = Buffer.from(headerLines.join('\r\n') + '\r\n\r\n' + body).toString('base64url');
+  try {
+    const res = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw, ...(threadId ? { threadId } : {}) },
+    });
+    return { success: true, messageId: res.data.id || undefined };
+  } catch (error) {
+    console.error('Send email error:', error);
+    return { success: false };
+  }
 }
 
 export interface EmailSummary {

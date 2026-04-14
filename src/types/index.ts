@@ -5,6 +5,8 @@ export interface Reminder {
   time?: string; // HH:MM
   done: boolean;
   createdAt: string;
+  recurring?: 'daily' | 'weekly' | 'monthly';
+  recurringParentId?: string;
 }
 
 export interface Habit {
@@ -20,9 +22,10 @@ export interface CalendarEvent {
   id: string;
   title: string;
   date: string;
+  time?: string; // HH:MM
   type: 'birthday' | 'event' | 'appointment';
   detail?: string;
-  googleEventId?: string; // synced from Google Calendar
+  googleEventId?: string;
 }
 
 export interface SpendingEntry {
@@ -30,7 +33,7 @@ export interface SpendingEntry {
   amount: number;
   category: string;
   description?: string;
-  date: string;
+  date: string; // YYYY-MM-DD
 }
 
 export interface SpendingSummary {
@@ -43,6 +46,33 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
   time: string;
+  draftEmail?: {
+    to: string;
+    subject: string;
+    body: string;
+    threadId?: string;
+    inReplyTo?: string;
+  };
+}
+
+export interface Todo {
+  id: string;
+  title: string;
+  scope: 'daily' | 'weekly';
+  done: boolean;
+  doneDate?: string;
+  createdAt: string;
+  forDate: string;
+}
+
+export interface VidaNotification {
+  id: string;
+  type: 'calendar_prep' | 'spending' | 'habit' | 'email' | 'general';
+  title: string;
+  body: string;
+  urgency: 'high' | 'medium' | 'low';
+  createdAt: string;
+  read: boolean;
 }
 
 export interface VidaData {
@@ -51,15 +81,22 @@ export interface VidaData {
   habits: Habit[];
   events: CalendarEvent[];
   spending: SpendingSummary[];
+  spendingEntries: SpendingEntry[];
+  todos: Todo[];
+  notifications: VidaNotification[];
+  lastResetMonth?: string; // YYYY-MM — for monthly spending reset
 }
 
-// Gemini function calling types
 export interface GeminiAction {
-  action: 'create_reminder' | 'complete_reminder' | 'log_habit' | 'create_habit' |
-          'log_spending' | 'add_event' | 'check_schedule' | 'check_habits' |
-          'check_spending' | 'check_email' | 'set_budget' |
-          'delete_reminder' | 'delete_habit' | 'delete_event' |
-          'greeting' | 'help' | 'suggestion' | 'general';
+  action:
+    | 'create_reminder' | 'complete_reminder'
+    | 'log_habit' | 'create_habit'
+    | 'log_spending' | 'add_event' | 'check_schedule'
+    | 'check_habits' | 'check_spending' | 'check_email'
+    | 'set_budget' | 'delete_reminder' | 'delete_habit' | 'delete_event'
+    | 'create_todo' | 'complete_todo' | 'delete_todo' | 'list_todos'
+    | 'read_email' | 'draft_email'
+    | 'greeting' | 'help' | 'suggestion' | 'general';
   params?: Record<string, string | number | boolean>;
   response: string;
 }

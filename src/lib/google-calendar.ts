@@ -88,6 +88,49 @@ export async function createCalendarEvent(
   }
 }
 
+export async function deleteCalendarEvent(accessToken: string, eventId: string): Promise<boolean> {
+  const calendar = getCalendarClient(accessToken);
+  try {
+    await calendar.events.delete({ calendarId: 'primary', eventId });
+    return true;
+  } catch (error) {
+    console.error('Calendar delete error:', error);
+    return false;
+  }
+}
+
+export async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  params: { title?: string; date?: string; time?: string; description?: string }
+): Promise<{ success: boolean }> {
+  const calendar = getCalendarClient(accessToken);
+  try {
+    const existing = await calendar.events.get({ calendarId: 'primary', eventId });
+    const patch: Record<string, unknown> = {};
+    if (params.title) patch.summary = params.title;
+    if (params.description) patch.description = params.description;
+    if (params.date) {
+      const { time } = params;
+      if (time) {
+        const startDt = `${params.date}T${time}:00`;
+        const endDate = new Date(`${params.date}T${time}:00`);
+        endDate.setMinutes(endDate.getMinutes() + 60);
+        patch.start = { dateTime: startDt, timeZone: 'Africa/Johannesburg' };
+        patch.end = { dateTime: endDate.toISOString().substring(0, 19), timeZone: 'Africa/Johannesburg' };
+      } else if (existing.data.start?.date) {
+        patch.start = { date: params.date };
+        patch.end = { date: params.date };
+      }
+    }
+    await calendar.events.patch({ calendarId: 'primary', eventId, requestBody: patch });
+    return { success: true };
+  } catch (error) {
+    console.error('Calendar update error:', error);
+    return { success: false };
+  }
+}
+
 export async function getBirthdays(accessToken: string) {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
