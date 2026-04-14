@@ -1,10 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { VidaData, Reminder, Habit, CalendarEvent, SpendingSummary, SpendingEntry, ChatMessage, Todo, VidaNotification, Goal } from '@/types';
 
 const STORE_KEY = 'vida_data';
 const USER_KEY = 'vida_user_id';
+
+// Debounce helper — delays Supabase sync to avoid hammering DB on rapid changes
+function debounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number) {
+  let timer: ReturnType<typeof setTimeout>;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
 const COLORS = ['sage', 'lavender', 'pink', 'peach', 'sky', 'mint'];
 
 function todayStr(): string {
@@ -92,32 +101,80 @@ function migrateData(raw: Partial<VidaData>): VidaData {
 export function useVidaData(userId?: string | null) {
   const [data, setData] = useState<VidaData>(emptyData());
   const [loaded, setLoaded] = useState(false);
+  const syncingRef = useRef(false);
+
+  // Debounced Supabase sync — fires 2s after last save
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const syncToSupabase = useCallback(
+    debounce(async (payload: VidaData) => {
+      if (syncingRef.current) return;
+      syncingRef.current = true;
+      try {
+        await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch { /* silently fail — localStorage is still the source of truth */ }
+      syncingRef.current = false;
+    }, 2000),
+    []
+  );
 
   useEffect(() => {
-    try {
-      const storedUserId = localStorage.getItem(USER_KEY);
-      const stored = localStorage.getItem(STORE_KEY);
-      if (userId && storedUserId !== userId) {
-        localStorage.removeItem(STORE_KEY);
-        localStorage.setItem(USER_KEY, userId);
-        setData(emptyData());
-      } else {
-        if (userId) localStorage.setItem(USER_KEY, userId);
-        if (stored) {
-          let parsed = migrateData(JSON.parse(stored));
-          parsed = applyMonthlyReset(parsed);
-          parsed.todos = pruneOldTodos(parsed.todos);
-          setData(parsed);
-          // Persist any migrations immediately
-          try { localStorage.setItem(STORE_KEY, JSON.stringify(parsed)); } catch {}
+    let cancelled = false;
+
+    async function load() {
+      // 1. Load from localStorage immediately (fast, offline-first)
+      let localData: VidaData | null = null;
+      try {
+        const storedUserId = localStorage.getItem(USER_KEY);
+        const stored = localStorage.getItem(STORE_KEY);
+        if (userId && storedUserId !== userId) {
+          localStorage.removeItem(STORE_KEY);
+          localStorage.setItem(USER_KEY, userId);
+        } else {
+          if (userId) localStorage.setItem(USER_KEY, userId);
+          if (stored) {
+            let parsed = migrateData(JSON.parse(stored));
+            parsed = applyMonthlyReset(parsed);
+            parsed.todos = pruneOldTodos(parsed.todos);
+            localData = parsed;
+          }
         }
+      } catch { /* use defaults */ }
+
+      if (!cancelled) {
+        setData(localData ?? emptyData());
+        setLoaded(true);
       }
-    } catch { /* use defaults */ }
-    setLoaded(true);
+
+      // 2. Fetch from Supabase in background (only if logged in)
+      if (!userId) return;
+      try {
+        const res = await fetch('/api/sync');
+        if (!res.ok || cancelled) return;
+        const { data: remoteRaw } = await res.json();
+        if (!remoteRaw || cancelled) return;
+
+        let remote = migrateData(remoteRaw);
+        remote = applyMonthlyReset(remote);
+        remote.todos = pruneOldTodos(remote.todos);
+
+        if (!cancelled) {
+          setData(remote);
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(remote)); } catch {}
+        }
+      } catch { /* network error — local data is fine */ }
+    }
+
+    load();
+    return () => { cancelled = true; };
   }, [userId]);
 
   const persist = (newData: VidaData) => {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(newData)); } catch {}
+    if (userId) syncToSupabase(newData);
   };
 
   const save = useCallback((newData: VidaData) => {
