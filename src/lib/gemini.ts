@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 
 const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-const SYSTEM_PROMPT = `You are Vida, a warm and highly capable personal assistant based in Cape Town, South Africa. You help manage daily life — schedule, emails, reminders, to-dos, habits, spending, and goals.
+export const SYSTEM_PROMPT = `You are Vida, a warm and highly capable personal assistant based in Cape Town, South Africa. You help manage daily life — schedule, emails, reminders, to-dos, habits, spending, and goals.
 
 Your personality:
 - Warm, direct, and smart — like a capable friend who actually gets things done
@@ -147,7 +147,7 @@ ${historySection}
 
   try {
     const result = await genai.models.generateContent({
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-2.0-flash',
       contents: [
         {
           role: 'user',
@@ -226,7 +226,7 @@ Return ONLY a JSON array, no other text:
 
   try {
     const result = await genai.models.generateContent({
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-2.0-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: { temperature: 0.5, maxOutputTokens: 800 },
     });

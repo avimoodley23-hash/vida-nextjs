@@ -1,8 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processWithGemini } from '@/lib/gemini';
+import { processWithOpenAI } from '@/lib/openai-ai';
+import { processWithGroq } from '@/lib/groq-ai';
 import { getUpcomingEvents, deleteCalendarEvent } from '@/lib/google-calendar';
 import { getRecentEmails, getBankTransactions, getEmailBody, sendEmail } from '@/lib/gmail';
 import { getWeather, weatherToContext } from '@/lib/weather';
+
+async function processWithAI(
+  model: string,
+  ...args: Parameters<typeof processWithGemini>
+): ReturnType<typeof processWithGemini> {
+  if (model === 'gpt') return processWithOpenAI(...args);
+  if (model === 'groq') return processWithGroq(...args);
+  // Default: Gemini → auto-fallback to Groq (free) on rate-limit/error
+  try {
+    const result = await processWithGemini(...args);
+    if (result.action !== 'general' || result.response !== 'Sorry, had a moment there. Try again?') return result;
+    throw new Error('gemini_fallback');
+  } catch {
+    if (process.env.GROQ_API_KEY) return processWithGroq(...args);
+    if (process.env.OPENAI_API_KEY) return processWithOpenAI(...args);
+    throw new Error('No AI provider available');
+  }
+}
 
 // In-memory context cache per access token (5 min TTL)
 interface CachedContext {
@@ -24,7 +44,7 @@ function getCached(token: string): CachedContext | null {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, context, accessToken, workAccessToken, history } = body;
+    const { message, context, accessToken, workAccessToken, history, model = 'gemini' } = body;
 
     if (!message) return NextResponse.json({ error: 'No message provided' }, { status: 400 });
 
@@ -123,7 +143,7 @@ export async function POST(req: NextRequest) {
         `${s.cat}: R${s.amount} spent / R${s.budget} budget${s.amount > s.budget ? ' ⚠️ OVER' : s.amount > s.budget * 0.8 ? ' (nearing limit)' : ''}`
     );
 
-    const result = await processWithGemini(message, {
+    const result = await processWithAI(model, message, {
       today: context?.today || new Date().toISOString().split('T')[0],
       currentTime: context?.currentTime || new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
       userName: context?.userName,
@@ -146,8 +166,8 @@ export async function POST(req: NextRequest) {
       try {
         const emailData = await getEmailBody(accessToken, String(result.params.emailId));
         if (emailData.body) {
-          // Re-run Gemini with the full email body as extra context
-          const followUp = await processWithGemini(message, {
+          // Re-run with full email body as extra context
+          const followUp = await processWithAI(model, message, {
             today: context?.today || new Date().toISOString().split('T')[0],
             currentTime: context?.currentTime || new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
             userName: context?.userName,

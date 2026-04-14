@@ -2,12 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUpcomingEvents } from '@/lib/google-calendar';
 import { getRecentEmails } from '@/lib/gmail';
 import { generateBriefingNotifications } from '@/lib/gemini';
+import { generateBriefingNotificationsOpenAI } from '@/lib/openai-ai';
+import { generateBriefingNotificationsGroq } from '@/lib/groq-ai';
 import { getWeather, weatherToContext } from '@/lib/weather';
+
+async function generateBriefing(
+  model: string,
+  ...args: Parameters<typeof generateBriefingNotifications>
+): ReturnType<typeof generateBriefingNotifications> {
+  if (model === 'gpt') return generateBriefingNotificationsOpenAI(...args);
+  if (model === 'groq') return generateBriefingNotificationsGroq(...args);
+  // Default: Gemini → auto-fallback to Groq (free) on rate-limit/error
+  try {
+    const result = await generateBriefingNotifications(...args);
+    if (result.length > 0) return result;
+    throw new Error('gemini_empty');
+  } catch {
+    if (process.env.GROQ_API_KEY) return generateBriefingNotificationsGroq(...args);
+    if (process.env.OPENAI_API_KEY) return generateBriefingNotificationsOpenAI(...args);
+    return [];
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { accessToken, workAccessToken, spending, habits, today, currentTime, userName } = body;
+    const { accessToken, workAccessToken, spending, habits, today, currentTime, userName, model = 'gemini' } = body;
 
     if (!accessToken) return NextResponse.json({ error: 'No access token' }, { status: 401 });
 
@@ -69,7 +89,7 @@ export async function POST(req: NextRequest) {
       return `${h.name}: streak ${h.streak} days, last logged ${daysSince === 0 ? 'today' : `${daysSince} days ago`}`;
     });
 
-    const notifications = await generateBriefingNotifications({
+    const notifications = await generateBriefing(model, {
       today: todayStr,
       currentTime: currentTime || new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
       userName,

@@ -116,6 +116,7 @@ export default function VidaApp() {
   const [typing, setTyping] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [aiModel, setAiModel] = useState<'gemini' | 'groq' | 'gpt'>('gemini');
   const [recording, setRecording] = useState(false);
   const [budgetModal, setBudgetModal] = useState<string | null>(null);
   const [budgetInput, setBudgetInput] = useState('');
@@ -218,6 +219,7 @@ export default function VidaApp() {
           today,
           currentTime: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
           userName,
+          model: aiModel,
         }),
       });
       const json = await res.json();
@@ -296,6 +298,7 @@ export default function VidaApp() {
         body: JSON.stringify({
           message: briefingMsg,
           accessToken,
+          model: aiModel,
           context: buildContext(),
         }),
       })
@@ -360,6 +363,7 @@ export default function VidaApp() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text, accessToken,
+          model: aiModel,
           history: historySnapshot.map(m => ({ role: m.role, text: m.text })),
           context: buildContext(),
         }),
@@ -781,10 +785,20 @@ export default function VidaApp() {
         {panel === 'chat' && (
           <div className="h-full flex flex-col">
             <div className="flex items-center justify-between px-4 mb-1 shrink-0">
-              <div className="flex items-center gap-1.5 text-[11px] text-sage-dark font-semibold bg-sage-light px-3 py-1 rounded-full">
-                <div className="w-1.5 h-1.5 rounded-full bg-sage-dark animate-pulse" />
-                Vida AI · Gemini
-              </div>
+              <button
+                onClick={() => setAiModel(m => m === 'gemini' ? 'groq' : m === 'groq' ? 'gpt' : 'gemini')}
+                title="Switch AI model (Gemini → Groq → GPT)"
+                className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-full transition active:scale-95"
+                style={aiModel === 'gpt'
+                  ? { background: 'rgba(116,185,105,0.15)', color: '#3a7a34' }
+                  : aiModel === 'groq'
+                  ? { background: 'rgba(255,145,77,0.12)', color: '#b85a00' }
+                  : { background: 'rgba(116,185,162,0.15)', color: '#2d7a6a' }
+                }
+              >
+                <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: aiModel === 'gpt' ? '#3a7a34' : aiModel === 'groq' ? '#b85a00' : '#2d7a6a' }} />
+                {aiModel === 'gpt' ? 'Vida AI · GPT-4o' : aiModel === 'groq' ? 'Vida AI · Llama 3.3' : 'Vida AI · Gemini'}
+              </button>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => { setTtsEnabled(e => !e); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }}
